@@ -119,8 +119,12 @@ class OperationLogger:
     def __init__(self, log_file='operation_log.txt'):
         self.log_file = log_file
         self.enabled = True
+        # 确保日志目录存在
+        log_dir = os.path.dirname(log_file)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir)
         
-    def log(self, operation_type, message, details=''):
+    def log(self, operation_type, message, details='', exception=None):
         """记录操作日志"""
         if not self.enabled:
             return
@@ -129,6 +133,8 @@ class OperationLogger:
         log_entry = f"[{timestamp}] [{operation_type}] {message}"
         if details:
             log_entry += f"\n{details}"
+        if exception:
+            log_entry += f"\n异常信息: {str(exception)}"
         
         print(log_entry)
         
@@ -137,6 +143,22 @@ class OperationLogger:
                 f.write(log_entry + '\n')
         except Exception as e:
             print(f"日志记录失败: {e}")
+    
+    def info(self, message, details=''):
+        """记录信息日志"""
+        self.log('INFO', message, details)
+    
+    def warning(self, message, details=''):
+        """记录警告日志"""
+        self.log('WARNING', message, details)
+    
+    def error(self, message, details='', exception=None):
+        """记录错误日志"""
+        self.log('ERROR', message, details, exception)
+    
+    def debug(self, message, details=''):
+        """记录调试日志"""
+        self.log('DEBUG', message, details)
 
 class SQLSyntaxHighlighter(QSyntaxHighlighter):
     """SQL语法高亮"""
@@ -189,6 +211,15 @@ class SQLCompleter(QCompleter):
     def __init__(self, parent=None):
         super(SQLCompleter, self).__init__(parent)
         
+        # 初始化补全列表
+        self.update_completion_list()
+        
+        self.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        
+    def update_completion_list(self, tables=None, columns=None):
+        """更新补全列表"""
         # SQL关键字
         sql_keywords = [
             'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER',
@@ -206,11 +237,16 @@ class SQLCompleter(QCompleter):
         # 构建补全列表
         completion_list = sql_keywords + functions
         
+        # 添加表名
+        if tables:
+            completion_list.extend(tables)
+        
+        # 添加列名
+        if columns:
+            completion_list.extend(columns)
+        
         # 使用字符串列表作为模型
         self.setModel(QStringListModel(completion_list))
-        self.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        self.setFilterMode(Qt.MatchFlag.MatchContains)
-        self.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         
     def showPopup(self):
         """显示补全弹窗"""
@@ -219,9 +255,9 @@ class SQLCompleter(QCompleter):
         popup = self.popup()
         if popup:
             # 设置最小宽度
-            popup.setMinimumWidth(200)
+            popup.setMinimumWidth(300)
             # 调整列宽以适应内容
-            popup.setColumnWidth(0, 200)
+            popup.setColumnWidth(0, 300)
 
 class SQLTextEdit(QTextEdit):
     """SQL文本编辑器"""
@@ -260,6 +296,11 @@ class SQLTextEdit(QTextEdit):
         self.textChanged.connect(self.on_text_changed)
         self.cursorPositionChanged.connect(self.on_cursor_position_changed)
     
+    def update_completion(self, tables=None, columns=None):
+        """更新补全列表"""
+        if self.completer:
+            self.completer.update_completion_list(tables, columns)
+    
     def on_text_changed(self):
         """文本变化时的处理"""
         # 触发自动补全
@@ -295,25 +336,38 @@ class SQLTextEdit(QTextEdit):
                 self.insertPlainText('    ')
                 event.accept()
         elif event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
-            # 自动缩进
-            cursor = self.textCursor()
-            block = cursor.block()
-            text = block.text()
-            
-            # 计算缩进
-            indent = 0
-            for char in text:
-                if char == ' ': indent += 1
-                elif char == '\t': indent += 4
-                else: break
-            
-            # 检查是否需要增加缩进
-            if text.strip().endswith('{') or text.strip().endswith('(') or text.strip().endswith('['):
-                indent += 4
-            
-            # 插入换行和缩进
-            self.insertPlainText('\n' + ' ' * indent)
-            event.accept()
+            # 检查是否有活动的补全
+            if self.completer and self.completer.popup().isVisible():
+                # 选择当前补全项
+                self.completer.popup().hide()
+                completion = self.completer.currentCompletion()
+                if completion:
+                    # 替换当前单词
+                    cursor = self.textCursor()
+                    cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+                    cursor.removeSelectedText()
+                    cursor.insertText(completion)
+                event.accept()
+            else:
+                # 自动缩进
+                cursor = self.textCursor()
+                block = cursor.block()
+                text = block.text()
+                
+                # 计算缩进
+                indent = 0
+                for char in text:
+                    if char == ' ': indent += 1
+                    elif char == '\t': indent += 4
+                    else: break
+                
+                # 检查是否需要增加缩进
+                if text.strip().endswith('{') or text.strip().endswith('(') or text.strip().endswith('['):
+                    indent += 4
+                
+                # 插入换行和缩进
+                self.insertPlainText('\n' + ' ' * indent)
+                event.accept()
         elif event.key() == Qt.Key.Key_BraceRight or event.key() == Qt.Key.Key_ParenRight or event.key() == Qt.Key.Key_BracketRight:
             # 自动匹配右括号
             cursor = self.textCursor()
@@ -379,6 +433,10 @@ class SQLTextEdit(QTextEdit):
             # 调整补全弹窗的位置和大小
             rect.setWidth(300)  # 设置固定宽度
             self.completer.complete(rect)
+        else:
+            # 如果当前单词为空或不是字母数字，隐藏补全弹窗
+            if self.completer and self.completer.popup().isVisible():
+                self.completer.popup().hide()
 
 class ConnectionDialog(QDialog):
     """新建连接对话框"""
@@ -1559,81 +1617,124 @@ class NavicatStyleSQLTool(QMainWindow):
     
     def execute_sql(self):
         """执行SQL"""
-        current_tab = self.tabs.currentWidget()
-        if not current_tab:
-            QMessageBox.warning(self, "执行SQL", "没有打开的查询标签页")
-            self.logger.log('WARNING', "尝试执行SQL但没有打开的查询标签页")
-            return
-        
-        # 获取SQL编辑器
-        sql_editor = None
-        result_table = None
-        message_output = None
-        
-        # 遍历子部件找到SQL编辑器和结果区域
-        for widget in current_tab.findChildren(QWidget):
-            if isinstance(widget, SQLTextEdit):
-                sql_editor = widget
-            elif isinstance(widget, QSplitter):
-                # 遍历分割器中的部件
-                for splitter_widget in widget.findChildren(QWidget):
-                    if isinstance(splitter_widget, QTableWidget):
-                        result_table = splitter_widget
-                    elif isinstance(splitter_widget, QTextEdit) and not isinstance(splitter_widget, SQLTextEdit):
-                        # 确保只选择普通QTextEdit作为消息输出，排除SQLTextEdit
-                        message_output = splitter_widget
-        
-        if not sql_editor:
-            QMessageBox.warning(self, "执行SQL", "无法找到SQL编辑器")
-            self.logger.log('WARNING', "尝试执行SQL但无法找到SQL编辑器")
-            return
-        
-        sql = sql_editor.toPlainText()
-        if not sql.strip():
-            QMessageBox.warning(self, "执行SQL", "请输入SQL语句")
-            self.logger.log('WARNING', "尝试执行SQL但SQL语句为空")
-            return
-        
-        # 检查是否已连接数据库
-        if not hasattr(self, 'db_connection'):
-            QMessageBox.warning(self, "执行SQL", "请先连接到数据库")
-            self.logger.log('WARNING', "尝试执行SQL但未连接到数据库")
-            return
-        
-        # 显示执行中的提示
-        if message_output:
-            message_output.setPlainText("SQL执行中...")
-        
-        # 记录SQL执行开始
-        self.logger.log('INFO', f"开始执行SQL语句: {sql[:100]}...")
-        
-        # 导入必要的模块
-        from PyQt6.QtCore import QRunnable, QThreadPool, pyqtSignal, QObject
-        
-        # 定义信号类
-        class WorkerSignals(QObject):
-            finished = pyqtSignal(dict)
-            error = pyqtSignal(str)
-        
-        # 定义工作线程
-        class SQLWorker(QRunnable):
-            def __init__(self, sql, db_connection, db_type, parent):
-                super().__init__()
-                self.sql = sql
-                self.db_connection = db_connection
-                self.db_type = db_type
-                self.parent = parent
-                self.signals = WorkerSignals()
+        try:
+            current_tab = self.tabs.currentWidget()
+            if not current_tab:
+                QMessageBox.warning(self, "执行SQL", "没有打开的查询标签页")
+                self.logger.warning("尝试执行SQL但没有打开的查询标签页")
+                return
             
-            def run(self):
-                start_time = time.time()
-                try:
-                    results = None
-                    affected_rows = 0
-                    
-                    # 执行SQL
-                    if self.db_type == 'MySQL' or self.db_type == 'PostgreSQL':
-                        with self.db_connection.cursor() as cursor:
+            # 获取SQL编辑器
+            sql_editor = None
+            result_table = None
+            message_output = None
+            
+            # 遍历子部件找到SQL编辑器和结果区域
+            # 使用递归查找所有子部件
+            for widget in current_tab.findChildren(QWidget):
+                if isinstance(widget, SQLTextEdit):
+                    sql_editor = widget
+                elif isinstance(widget, QTableWidget):
+                    result_table = widget
+                elif isinstance(widget, QTextEdit) and not isinstance(widget, SQLTextEdit):
+                    # 确保只选择普通QTextEdit作为消息输出，排除SQLTextEdit
+                    message_output = widget
+            
+            # 如果没有找到，尝试遍历分割器中的部件
+            if not result_table or not message_output:
+                for widget in current_tab.findChildren(QSplitter):
+                    for splitter_widget in widget.findChildren(QWidget):
+                        if isinstance(splitter_widget, QTableWidget):
+                            result_table = splitter_widget
+                        elif isinstance(splitter_widget, QTextEdit) and not isinstance(splitter_widget, SQLTextEdit):
+                            message_output = splitter_widget
+            
+            if not sql_editor:
+                QMessageBox.warning(self, "执行SQL", "无法找到SQL编辑器")
+                self.logger.warning("尝试执行SQL但无法找到SQL编辑器")
+                return
+            
+            # 检查是否有选中的文本
+            cursor = sql_editor.textCursor()
+            if cursor.hasSelection():
+                # 执行选中的文本
+                sql = cursor.selectedText()
+            else:
+                # 执行整个编辑器的内容
+                sql = sql_editor.toPlainText()
+            
+            if not sql.strip():
+                QMessageBox.warning(self, "执行SQL", "请输入SQL语句")
+                self.logger.warning("尝试执行SQL但SQL语句为空")
+                return
+            
+            # 检查是否已连接数据库
+            if not hasattr(self, 'db_connection'):
+                QMessageBox.warning(self, "执行SQL", "请先连接到数据库")
+                self.logger.warning("尝试执行SQL但未连接到数据库")
+                return
+            
+            # 显示执行中的提示
+            if message_output:
+                message_output.setPlainText("SQL执行中...")
+            
+            # 记录SQL执行开始
+            self.logger.info(f"开始执行SQL语句: {sql[:100]}...")
+            
+            # 导入必要的模块
+            from PyQt6.QtCore import QRunnable, QThreadPool, pyqtSignal, QObject
+            
+            # 定义信号类
+            class WorkerSignals(QObject):
+                finished = pyqtSignal(dict)
+                error = pyqtSignal(str)
+            
+            # 定义工作线程
+            class SQLWorker(QRunnable):
+                def __init__(self, sql, db_connection, db_type, parent):
+                    super().__init__()
+                    self.sql = sql
+                    self.db_connection = db_connection
+                    self.db_type = db_type
+                    self.parent = parent
+                    self.signals = WorkerSignals()
+                
+                def run(self):
+                    start_time = time.time()
+                    try:
+                        results = None
+                        affected_rows = 0
+                        
+                        # 执行SQL
+                        if self.db_type == 'MySQL' or self.db_type == 'PostgreSQL':
+                            with self.db_connection.cursor() as cursor:
+                                cursor.execute(self.sql)
+                                
+                                # 检查是否是查询语句
+                                if self.sql.strip().upper().startswith('SELECT') or self.sql.strip().upper().startswith('SHOW'):
+                                    # 获取结果
+                                    results = cursor.fetchall()
+                                else:
+                                    # 非查询语句，获取影响行数
+                                    affected_rows = cursor.rowcount
+                                    if self.db_type == 'MySQL':
+                                        self.db_connection.commit()
+                        
+                        elif self.db_type == 'SQLite':
+                            cursor = self.db_connection.cursor()
+                            cursor.execute(self.sql)
+                            
+                            # 检查是否是查询语句
+                            if self.sql.strip().upper().startswith('SELECT'):
+                                # 获取结果
+                                results = cursor.fetchall()
+                            else:
+                                # 非查询语句，获取影响行数
+                                affected_rows = cursor.rowcount
+                                self.db_connection.commit()
+                        
+                        elif self.db_type == 'SQL Server':
+                            cursor = self.db_connection.cursor()
                             cursor.execute(self.sql)
                             
                             # 检查是否是查询语句
@@ -1643,125 +1744,108 @@ class NavicatStyleSQLTool(QMainWindow):
                             else:
                                 # 非查询语句，获取影响行数
                                 affected_rows = cursor.rowcount
-                                if self.db_type == 'MySQL':
-                                    self.db_connection.commit()
-                    
-                    elif self.db_type == 'SQLite':
-                        cursor = self.db_connection.cursor()
-                        cursor.execute(self.sql)
+                                self.db_connection.commit()
                         
-                        # 检查是否是查询语句
-                        if self.sql.strip().upper().startswith('SELECT'):
-                            # 获取结果
-                            results = cursor.fetchall()
-                        else:
-                            # 非查询语句，获取影响行数
-                            affected_rows = cursor.rowcount
-                            self.db_connection.commit()
-                    
-                    elif self.db_type == 'SQL Server':
-                        cursor = self.db_connection.cursor()
-                        cursor.execute(self.sql)
+                        execution_time = time.time() - start_time
                         
-                        # 检查是否是查询语句
-                        if self.sql.strip().upper().startswith('SELECT') or self.sql.strip().upper().startswith('SHOW'):
-                            # 获取结果
-                            results = cursor.fetchall()
-                        else:
-                            # 非查询语句，获取影响行数
-                            affected_rows = cursor.rowcount
-                            self.db_connection.commit()
-                    
-                    execution_time = time.time() - start_time
-                    
-                    # 发送结果
-                    self.signals.finished.emit({
-                        'results': results,
-                        'affected_rows': affected_rows,
-                        'execution_time': execution_time
-                    })
-                    
-                except Exception as e:
-                    self.signals.error.emit(str(e))
-        
-        # 创建工作线程
-        worker = SQLWorker(sql, self.db_connection, self.current_db_type, self)
-        
-        # 连接信号
-        def on_finished(result):
-            # 清空结果
-            if result_table:
-                result_table.setRowCount(0)
-                result_table.setColumnCount(0)
+                        # 发送结果
+                        self.signals.finished.emit({
+                            'results': results,
+                            'affected_rows': affected_rows,
+                            'execution_time': execution_time
+                        })
+                        
+                    except Exception as e:
+                        self.signals.error.emit(str(e))
             
-            # 处理结果
-            results = result['results']
-            affected_rows = result['affected_rows']
-            execution_time = result['execution_time']
+            # 创建工作线程
+            worker = SQLWorker(sql, self.db_connection, self.current_db_type, self)
             
-            if results and result_table:
+            # 连接信号
+            def on_finished(result):
                 try:
-                    # 设置列
-                    if self.current_db_type == 'MySQL' or self.current_db_type == 'PostgreSQL':
-                        columns = list(results[0].keys()) if isinstance(results[0], dict) else [f'列{i+1}' for i in range(len(results[0]))]
-                    elif self.current_db_type == 'SQL Server':
-                        # 尝试获取列名，如果失败则使用默认列名
+                    # 清空结果
+                    if result_table:
+                        result_table.setRowCount(0)
+                        result_table.setColumnCount(0)
+                    
+                    # 处理结果
+                    results = result['results']
+                    affected_rows = result['affected_rows']
+                    execution_time = result['execution_time']
+                    
+                    if results and result_table:
                         try:
-                            # 注意：这里无法直接访问cursor，因为它在工作线程中
-                            columns = [f'列{i+1}' for i in range(len(results[0]))]
-                        except:
-                            columns = [f'列{i+1}' for i in range(len(results[0]))]
-                    else:
-                        columns = [f'列{i+1}' for i in range(len(results[0]))]
+                            # 设置列
+                            if self.current_db_type == 'MySQL' or self.current_db_type == 'PostgreSQL':
+                                columns = list(results[0].keys()) if isinstance(results[0], dict) else [f'列{i+1}' for i in range(len(results[0]))]
+                            elif self.current_db_type == 'SQL Server':
+                                # 尝试获取列名，如果失败则使用默认列名
+                                try:
+                                    # 注意：这里无法直接访问cursor，因为它在工作线程中
+                                    columns = [f'列{i+1}' for i in range(len(results[0]))]
+                                except:
+                                    columns = [f'列{i+1}' for i in range(len(results[0]))]
+                            else:
+                                columns = [f'列{i+1}' for i in range(len(results[0]))]
+                            
+                            result_table.setColumnCount(len(columns))
+                            result_table.setHorizontalHeaderLabels(columns)
+                            
+                            # 添加数据
+                            result_table.setRowCount(len(results))
+                            for row_idx, row_data in enumerate(results):
+                                row_values = list(row_data.values()) if isinstance(row_data, dict) else row_data
+                                for col_idx, value in enumerate(row_values):
+                                    item = QTableWidgetItem(str(value))
+                                    result_table.setItem(row_idx, col_idx, item)
+                            
+                            # 调整列宽
+                            result_table.resizeColumnsToContents()
+                        except Exception as e:
+                            self.logger.error("处理查询结果时出错", exception=e)
+                            if message_output:
+                                message_output.setPlainText(f"SQL执行成功但处理结果时出错: {e}")
                     
-                    result_table.setColumnCount(len(columns))
-                    result_table.setHorizontalHeaderLabels(columns)
-                    
-                    # 添加数据
-                    result_table.setRowCount(len(results))
-                    for row_idx, row_data in enumerate(results):
-                        row_values = list(row_data.values()) if isinstance(row_data, dict) else row_data
-                        for col_idx, value in enumerate(row_values):
-                            item = QTableWidgetItem(str(value))
-                            result_table.setItem(row_idx, col_idx, item)
-                    
-                    # 调整列宽
-                    result_table.resizeColumnsToContents()
-                except Exception as e:
-                    self.logger.log('ERROR', f"处理查询结果时出错: {e}")
+                    # 显示执行信息
                     if message_output:
-                        message_output.setPlainText(f"SQL执行成功但处理结果时出错: {e}")
+                        message_output.setPlainText(f"SQL执行成功 | 执行时间: {execution_time:.4f} 秒 | 影响行数: {affected_rows if affected_rows else len(results) if results else 0}")
+                    
+                    # 更新状态栏
+                    self.execution_time.setText(f"执行时间: {execution_time:.4f} 秒")
+                    if results:
+                        self.record_count.setText(f"记录数: {len(results)}")
+                    else:
+                        self.record_count.setText(f"影响行数: {affected_rows}")
+                    self.status_info.setText("SQL执行成功")
+                    
+                    self.logger.info(f"执行SQL语句成功，执行时间: {execution_time:.4f} 秒，影响行数: {affected_rows if affected_rows else len(results) if results else 0}")
+                except Exception as e:
+                    self.logger.error("处理SQL执行结果时出错", exception=e)
+                    if message_output:
+                        message_output.setPlainText(f"处理SQL执行结果时出错: {e}")
+                    self.status_info.setText("处理结果失败")
             
-            # 显示执行信息
-            if message_output:
-                message_output.setPlainText(f"SQL执行成功 | 执行时间: {execution_time:.4f} 秒 | 影响行数: {affected_rows if affected_rows else len(results) if results else 0}")
+            def on_error(error):
+                # 显示错误信息
+                if message_output:
+                    message_output.setPlainText(f"SQL执行失败 | 错误信息: {error}")
+                
+                # 更新状态栏
+                self.status_info.setText("SQL执行失败")
+                
+                QMessageBox.critical(self, "执行SQL", f"执行SQL语句时出错: {error}")
+                self.logger.error(f"执行SQL语句失败: {error}")
             
-            # 更新状态栏
-            self.execution_time.setText(f"执行时间: {execution_time:.4f} 秒")
-            if results:
-                self.record_count.setText(f"记录数: {len(results)}")
-            else:
-                self.record_count.setText(f"影响行数: {affected_rows}")
-            self.status_info.setText("SQL执行成功")
+            worker.signals.finished.connect(on_finished)
+            worker.signals.error.connect(on_error)
             
-            self.logger.log('INFO', f"执行SQL语句成功，执行时间: {execution_time:.4f} 秒，影响行数: {affected_rows if affected_rows else len(results) if results else 0}")
-        
-        def on_error(error):
-            # 显示错误信息
-            if message_output:
-                message_output.setPlainText(f"SQL执行失败 | 错误信息: {error}")
-            
-            # 更新状态栏
-            self.status_info.setText("SQL执行失败")
-            
-            QMessageBox.critical(self, "执行SQL", f"执行SQL语句时出错: {error}")
-            self.logger.log('ERROR', f"执行SQL语句失败: {error}")
-        
-        worker.signals.finished.connect(on_finished)
-        worker.signals.error.connect(on_error)
-        
-        # 启动工作线程
-        QThreadPool.globalInstance().start(worker)
+            # 启动工作线程
+            QThreadPool.globalInstance().start(worker)
+        except Exception as e:
+            self.logger.error("执行SQL时出错", exception=e)
+            QMessageBox.critical(self, "执行SQL", f"执行SQL时出错: {str(e)}")
+            self.status_info.setText("执行SQL失败")
     
     def refresh_objects(self):
         """刷新对象"""
@@ -1809,6 +1893,12 @@ class NavicatStyleSQLTool(QMainWindow):
                 # 加载实际的数据库对象
                 self.load_database_objects()
                 
+                # 获取表名和列名用于自动补全
+                tables, columns = self.get_database_objects_for_completion()
+                
+                # 更新所有SQL编辑器的补全列表
+                self.update_all_sql_editors_completion(tables, columns)
+                
                 # 显示所有连接，保持连接列表完整
                 self.load_connections_to_tree(show_only_current=False)
                 
@@ -1823,6 +1913,99 @@ class NavicatStyleSQLTool(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "连接失败", f"连接数据库时出错: {str(e)}")
                 self.logger.log('ERROR', f"连接数据库失败: {str(e)}")
+    
+    def get_database_objects_for_completion(self):
+        """获取数据库对象用于自动补全"""
+        tables = []
+        columns = []
+        
+        if not hasattr(self, 'db_connection'):
+            return tables, columns
+        
+        try:
+            if self.current_db_type == 'MySQL':
+                with self.db_connection.cursor() as cursor:
+                    # 获取表名
+                    cursor.execute("SHOW TABLES")
+                    table_results = cursor.fetchall()
+                    for table in table_results:
+                        if isinstance(table, dict):
+                            table_name = list(table.values())[0]
+                        else:
+                            table_name = table[0]
+                        tables.append(table_name)
+                        
+                        # 获取列名
+                        cursor.execute(f"DESCRIBE {table_name}")
+                        column_results = cursor.fetchall()
+                        for column in column_results:
+                            if isinstance(column, dict):
+                                column_name = column['Field']
+                            else:
+                                column_name = column[0]
+                            columns.append(f"{table_name}.{column_name}")
+            
+            elif self.current_db_type == 'PostgreSQL':
+                with self.db_connection.cursor() as cursor:
+                    # 获取表名
+                    cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+                    table_results = cursor.fetchall()
+                    for table in table_results:
+                        table_name = table[0]
+                        tables.append(table_name)
+                        
+                        # 获取列名
+                        cursor.execute(f"SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '{table_name}'")
+                        column_results = cursor.fetchall()
+                        for column in column_results:
+                            column_name = column[0]
+                            columns.append(f"{table_name}.{column_name}")
+            
+            elif self.current_db_type == 'SQLite':
+                cursor = self.db_connection.cursor()
+                # 获取表名
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                table_results = cursor.fetchall()
+                for table in table_results:
+                    table_name = table[0]
+                    tables.append(table_name)
+                    
+                    # 获取列名
+                    cursor.execute(f"PRAGMA table_info({table_name})")
+                    column_results = cursor.fetchall()
+                    for column in column_results:
+                        column_name = column[1]
+                        columns.append(f"{table_name}.{column_name}")
+            
+            elif self.current_db_type == 'SQL Server':
+                cursor = self.db_connection.cursor()
+                # 获取表名
+                cursor.execute("SELECT name FROM sys.tables")
+                table_results = cursor.fetchall()
+                for table in table_results:
+                    table_name = table[0]
+                    tables.append(table_name)
+                    
+                    # 获取列名
+                    cursor.execute(f"SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('{table_name}')")
+                    column_results = cursor.fetchall()
+                    for column in column_results:
+                        column_name = column[0]
+                        columns.append(f"{table_name}.{column_name}")
+        
+        except Exception as e:
+            self.logger.log('ERROR', f"获取数据库对象失败: {e}")
+        
+        return tables, columns
+    
+    def update_all_sql_editors_completion(self, tables, columns):
+        """更新所有SQL编辑器的补全列表"""
+        for i in range(self.tabs.count()):
+            tab_widget = self.tabs.widget(i)
+            if tab_widget:
+                for widget in tab_widget.findChildren(QWidget):
+                    if isinstance(widget, SQLTextEdit):
+                        widget.update_completion(tables, columns)
     
     def load_database_objects(self):
         """加载数据库对象"""
@@ -3140,34 +3323,336 @@ class NavicatStyleSQLTool(QMainWindow):
                         menu.addAction("删除函数", lambda: self.show_feature_not_implemented("删除函数"))
                         menu.addSeparator()
                         menu.addAction("刷新", self.refresh_objects)
-                    elif obj_type == 'trigger':
-                        # 触发器右键菜单
-                        menu.addAction("查看触发器", lambda: self.show_feature_not_implemented("查看触发器"))
-                        menu.addAction("编辑触发器", lambda: self.show_feature_not_implemented("编辑触发器"))
-                        menu.addSeparator()
-                        menu.addAction("删除触发器", lambda: self.show_feature_not_implemented("删除触发器"))
-                        menu.addSeparator()
-                        menu.addAction("刷新", self.refresh_objects)
-                    else:
-                        # 默认菜单
-                        menu.addAction("新建查询", self.new_query)
-                        menu.addAction("刷新", self.refresh_objects)
-                else:
-                    # 数据格式不正确，显示默认菜单
-                    menu.addAction("新建查询", self.new_query)
-                    menu.addAction("刷新", self.refresh_objects)
-            else:
-                # 没有数据，显示默认菜单
-                menu.addAction("新建查询", self.new_query)
-                menu.addAction("刷新", self.refresh_objects)
         except Exception as e:
-            # 发生错误，显示默认菜单
-            self.logger.log('ERROR', f"显示右键菜单时出错: {e}")
-            menu.addAction("新建查询", self.new_query)
-            menu.addAction("刷新", self.refresh_objects)
+            self.logger.log('ERROR', f"创建对象上下文菜单失败: {e}")
         
         # 显示菜单
         menu.exec(self.object_tree.mapToGlobal(pos))
+    
+    def open_database(self, db_name):
+        """打开数据库"""
+        try:
+            if not hasattr(self, 'db_connection'):
+                QMessageBox.warning(self, "打开数据库", "请先连接到数据库服务器")
+                return
+            
+            # 切换数据库
+            if self.current_db_type == 'MySQL':
+                with self.db_connection.cursor() as cursor:
+                    cursor.execute(f"USE {db_name}")
+                    self.db_connection.commit()
+            elif self.current_db_type == 'PostgreSQL':
+                with self.db_connection.cursor() as cursor:
+                    cursor.execute(f"\\c {db_name}")
+                    self.db_connection.commit()
+            
+            self.current_db = db_name
+            self.update_query_tab_info()
+            self.load_database_objects()
+            self.status_info.setText(f"已打开数据库: {db_name}")
+            self.logger.log('INFO', f"打开数据库: {db_name}")
+        except Exception as e:
+            QMessageBox.critical(self, "打开数据库", f"打开数据库失败: {str(e)}")
+            self.logger.log('ERROR', f"打开数据库失败: {str(e)}")
+    
+    def open_table_data(self, table_name):
+        """打开表数据"""
+        try:
+            # 创建新的查询标签页
+            self.add_new_query_tab()
+            
+            # 获取当前标签页的SQL编辑器
+            current_tab = self.tabs.currentWidget()
+            if not current_tab:
+                return
+            
+            sql_editor = None
+            for widget in current_tab.findChildren(QWidget):
+                if isinstance(widget, SQLTextEdit):
+                    sql_editor = widget
+                    break
+            
+            if not sql_editor:
+                return
+            
+            # 生成查询语句
+            sql = f"SELECT * FROM {table_name} LIMIT 1000"
+            sql_editor.setPlainText(sql)
+            
+            # 执行查询
+            self.execute_sql()
+            
+            self.status_info.setText(f"已打开表: {table_name}")
+            self.logger.log('INFO', f"打开表数据: {table_name}")
+        except Exception as e:
+            QMessageBox.critical(self, "打开表数据", f"打开表数据失败: {str(e)}")
+            self.logger.log('ERROR', f"打开表数据失败: {str(e)}")
+    
+    def design_table(self, table_name):
+        """设计表"""
+        try:
+            # 显示表结构
+            self.view_table_structure(table_name)
+            self.logger.log('INFO', f"设计表: {table_name}")
+        except Exception as e:
+            QMessageBox.critical(self, "设计表", f"设计表失败: {str(e)}")
+            self.logger.log('ERROR', f"设计表失败: {str(e)}")
+    
+    def view_table_structure(self, table_name):
+        """查看表结构"""
+        try:
+            if not hasattr(self, 'db_connection'):
+                QMessageBox.warning(self, "查看表结构", "请先连接到数据库")
+                return
+            
+            # 创建表结构标签页
+            tab_widget = QWidget()
+            tab_layout = QVBoxLayout(tab_widget)
+            
+            # 创建表结构表格
+            structure_table = QTableWidget()
+            
+            if self.current_db_type == 'MySQL':
+                with self.db_connection.cursor() as cursor:
+                    # 查询表结构
+                    cursor.execute(f"DESCRIBE {table_name}")
+                    results = cursor.fetchall()
+                    
+                    if results:
+                        # 设置列
+                        columns = list(results[0].keys())
+                        structure_table.setColumnCount(len(columns))
+                        structure_table.setHorizontalHeaderLabels(columns)
+                        
+                        # 添加数据
+                        structure_table.setRowCount(len(results))
+                        for row_idx, row_data in enumerate(results):
+                            for col_idx, value in enumerate(row_data.values()):
+                                item = QTableWidgetItem(str(value))
+                                structure_table.setItem(row_idx, col_idx, item)
+            elif self.current_db_type == 'PostgreSQL':
+                with self.db_connection.cursor() as cursor:
+                    # 查询表结构
+                    cursor.execute(f"\nSELECT column_name, data_type, character_maximum_length, column_default, is_nullable FROM information_schema.columns WHERE table_name = '{table_name}'")
+                    results = cursor.fetchall()
+                    
+                    if results:
+                        # 设置列
+                        columns = ['column_name', 'data_type', 'character_maximum_length', 'column_default', 'is_nullable']
+                        structure_table.setColumnCount(len(columns))
+                        structure_table.setHorizontalHeaderLabels(columns)
+                        
+                        # 添加数据
+                        structure_table.setRowCount(len(results))
+                        for row_idx, row_data in enumerate(results):
+                            for col_idx, value in enumerate(row_data):
+                                item = QTableWidgetItem(str(value))
+                                structure_table.setItem(row_idx, col_idx, item)
+            elif self.current_db_type == 'SQLite':
+                cursor = self.db_connection.cursor()
+                # 查询表结构
+                cursor.execute(f"PRAGMA table_info({table_name})")
+                results = cursor.fetchall()
+                
+                if results:
+                    # 设置列
+                    columns = ['cid', 'name', 'type', 'notnull', 'dflt_value', 'pk']
+                    structure_table.setColumnCount(len(columns))
+                    structure_table.setHorizontalHeaderLabels(columns)
+                    
+                    # 添加数据
+                    structure_table.setRowCount(len(results))
+                    for row_idx, row_data in enumerate(results):
+                        for col_idx, value in enumerate(row_data):
+                            item = QTableWidgetItem(str(value))
+                            structure_table.setItem(row_idx, col_idx, item)
+            
+            # 调整列宽
+            structure_table.resizeColumnsToContents()
+            
+            tab_layout.addWidget(structure_table)
+            
+            # 添加标签页
+            tab_index = self.tabs.addTab(tab_widget, f"表结构 - {table_name}")
+            self.tabs.setCurrentIndex(tab_index)
+            
+            self.status_info.setText(f"已查看表结构: {table_name}")
+            self.logger.log('INFO', f"查看表结构: {table_name}")
+        except Exception as e:
+            QMessageBox.critical(self, "查看表结构", f"查看表结构失败: {str(e)}")
+            self.logger.log('ERROR', f"查看表结构失败: {str(e)}")
+    
+    def open_view(self, view_name):
+        """打开视图"""
+        try:
+            # 创建新的查询标签页
+            self.add_new_query_tab()
+            
+            # 获取当前标签页的SQL编辑器
+            current_tab = self.tabs.currentWidget()
+            if not current_tab:
+                return
+            
+            sql_editor = None
+            for widget in current_tab.findChildren(QWidget):
+                if isinstance(widget, SQLTextEdit):
+                    sql_editor = widget
+                    break
+            
+            if not sql_editor:
+                return
+            
+            # 生成查询语句
+            sql = f"SELECT * FROM {view_name} LIMIT 1000"
+            sql_editor.setPlainText(sql)
+            
+            # 执行查询
+            self.execute_sql()
+            
+            self.status_info.setText(f"已打开视图: {view_name}")
+            self.logger.log('INFO', f"打开视图: {view_name}")
+        except Exception as e:
+            QMessageBox.critical(self, "打开视图", f"打开视图失败: {str(e)}")
+            self.logger.log('ERROR', f"打开视图失败: {str(e)}")
+    
+    def view_view_structure(self, view_name):
+        """查看视图结构"""
+        try:
+            if not hasattr(self, 'db_connection'):
+                QMessageBox.warning(self, "查看视图结构", "请先连接到数据库")
+                return
+            
+            # 创建视图结构标签页
+            tab_widget = QWidget()
+            tab_layout = QVBoxLayout(tab_widget)
+            
+            # 创建视图结构表格
+            structure_table = QTableWidget()
+            
+            if self.current_db_type == 'MySQL':
+                with self.db_connection.cursor() as cursor:
+                    # 查询视图结构
+                    cursor.execute(f"SHOW CREATE VIEW {view_name}")
+                    results = cursor.fetchall()
+                    
+                    if results:
+                        # 获取视图定义
+                        view_definition = results[0]['Create View'] if isinstance(results[0], dict) else results[0][1]
+                        
+                        # 创建文本编辑器显示视图定义
+                        view_edit = QTextEdit()
+                        view_edit.setReadOnly(True)
+                        view_edit.setPlainText(view_definition)
+                        tab_layout.addWidget(view_edit)
+            elif self.current_db_type == 'PostgreSQL':
+                with self.db_connection.cursor() as cursor:
+                    # 查询视图结构
+                    cursor.execute(f"\nSELECT definition FROM pg_views WHERE viewname = '{view_name}'")
+                    results = cursor.fetchall()
+                    
+                    if results:
+                        # 获取视图定义
+                        view_definition = results[0][0]
+                        
+                        # 创建文本编辑器显示视图定义
+                        view_edit = QTextEdit()
+                        view_edit.setReadOnly(True)
+                        view_edit.setPlainText(view_definition)
+                        tab_layout.addWidget(view_edit)
+            
+            # 添加标签页
+            tab_index = self.tabs.addTab(tab_widget, f"视图结构 - {view_name}")
+            self.tabs.setCurrentIndex(tab_index)
+            
+            self.status_info.setText(f"已查看视图结构: {view_name}")
+            self.logger.log('INFO', f"查看视图结构: {view_name}")
+        except Exception as e:
+            QMessageBox.critical(self, "查看视图结构", f"查看视图结构失败: {str(e)}")
+            self.logger.log('ERROR', f"查看视图结构失败: {str(e)}")
+    
+    def view_procedure(self, procedure_name):
+        """查看存储过程"""
+        try:
+            if not hasattr(self, 'db_connection'):
+                QMessageBox.warning(self, "查看存储过程", "请先连接到数据库")
+                return
+            
+            # 创建存储过程标签页
+            tab_widget = QWidget()
+            tab_layout = QVBoxLayout(tab_widget)
+            
+            if self.current_db_type == 'MySQL':
+                with self.db_connection.cursor() as cursor:
+                    # 查询存储过程定义
+                    cursor.execute(f"SHOW CREATE PROCEDURE {procedure_name}")
+                    results = cursor.fetchall()
+                    
+                    if results:
+                        # 获取存储过程定义
+                        proc_definition = results[0]['Create Procedure'] if isinstance(results[0], dict) else results[0][2]
+                        
+                        # 创建文本编辑器显示存储过程定义
+                        proc_edit = QTextEdit()
+                        proc_edit.setReadOnly(True)
+                        proc_edit.setPlainText(proc_definition)
+                        tab_layout.addWidget(proc_edit)
+            elif self.current_db_type == 'PostgreSQL':
+                with self.db_connection.cursor() as cursor:
+                    # 查询存储过程定义
+                    cursor.execute(f"\nSELECT prosrc FROM pg_proc WHERE proname = '{procedure_name}'")
+                    results = cursor.fetchall()
+                    
+                    if results:
+                        # 获取存储过程定义
+                        proc_definition = results[0][0]
+                        
+                        # 创建文本编辑器显示存储过程定义
+                        proc_edit = QTextEdit()
+                        proc_edit.setReadOnly(True)
+                        proc_edit.setPlainText(proc_definition)
+                        tab_layout.addWidget(proc_edit)
+            
+            # 添加标签页
+            tab_index = self.tabs.addTab(tab_widget, f"存储过程 - {procedure_name}")
+            self.tabs.setCurrentIndex(tab_index)
+            
+            self.status_info.setText(f"已查看存储过程: {procedure_name}")
+            self.logger.log('INFO', f"查看存储过程: {procedure_name}")
+        except Exception as e:
+            QMessageBox.critical(self, "查看存储过程", f"查看存储过程失败: {str(e)}")
+            self.logger.log('ERROR', f"查看存储过程失败: {str(e)}")
+    
+    def commit_transaction(self):
+        """提交事务"""
+        try:
+            if not hasattr(self, 'db_connection'):
+                QMessageBox.warning(self, "提交事务", "请先连接到数据库")
+                return
+            
+            # 提交事务
+            self.db_connection.commit()
+            
+            self.status_info.setText("事务已提交")
+            self.logger.log('INFO', "事务已提交")
+        except Exception as e:
+            QMessageBox.critical(self, "提交事务", f"提交事务失败: {str(e)}")
+            self.logger.log('ERROR', f"提交事务失败: {str(e)}")
+    
+    def rollback_transaction(self):
+        """回滚事务"""
+        try:
+            if not hasattr(self, 'db_connection'):
+                QMessageBox.warning(self, "回滚事务", "请先连接到数据库")
+                return
+            
+            # 回滚事务
+            self.db_connection.rollback()
+            
+            self.status_info.setText("事务已回滚")
+            self.logger.log('INFO', "事务已回滚")
+        except Exception as e:
+            QMessageBox.critical(self, "回滚事务", f"回滚事务失败: {str(e)}")
+            self.logger.log('ERROR', f"回滚事务失败: {str(e)}")
     
     def on_object_double_clicked(self, item, column):
         """对象双击事件"""
@@ -3186,276 +3671,6 @@ class NavicatStyleSQLTool(QMainWindow):
             self.open_view(obj_name)
         elif obj_type == 'procedure':
             self.view_procedure(obj_name)
-    
-    def open_database(self, db_name):
-        """打开数据库"""
-        if self.current_db_type == 'MySQL':
-            try:
-                with self.db_connection.cursor() as cursor:
-                    cursor.execute(f"USE {db_name}")
-                    self.db_connection.commit()
-                # 更新当前数据库
-                self.current_db = db_name
-                # 重新加载对象
-                self.load_database_objects()
-                self.status_info.setText(f"已切换到数据库: {db_name}")
-                # 更新查询标签页的数据库信息
-                self.update_query_tab_info()
-            except Exception as e:
-                QMessageBox.critical(self, "打开数据库", f"打开数据库失败: {str(e)}")
-    
-    def design_table(self, table_name):
-        """设计表"""
-        QMessageBox.information(self, "设计表", f"设计表功能开发中: {table_name}")
-    
-    def view_table_structure(self, table_name):
-        """查看表结构"""
-        if self.current_db_type == 'MySQL':
-            try:
-                with self.db_connection.cursor() as cursor:
-                    cursor.execute(f"DESCRIBE {table_name}")
-                    structure = cursor.fetchall()
-                
-                # 创建结构查看标签页
-                tab_widget = QWidget()
-                tab_layout = QVBoxLayout(tab_widget)
-                
-                # 创建结构表格
-                structure_table = QTableWidget()
-                structure_table.setColumnCount(6)
-                structure_table.setHorizontalHeaderLabels(['字段名', '类型', '是否为空', '默认值', '键', '额外信息'])
-                
-                structure_table.setRowCount(len(structure))
-                for row_idx, row_data in enumerate(structure):
-                    for col_idx, value in enumerate(row_data.values()):
-                        item = QTableWidgetItem(str(value))
-                        structure_table.setItem(row_idx, col_idx, item)
-                
-                structure_table.resizeColumnsToContents()
-                tab_layout.addWidget(structure_table)
-                
-                # 添加标签页
-                tab_index = self.tabs.addTab(tab_widget, f"结构 - {table_name}")
-                self.tabs.setCurrentIndex(tab_index)
-                
-            except Exception as e:
-                QMessageBox.critical(self, "查看表结构", f"查看表结构失败: {str(e)}")
-    
-    def open_view(self, view_name):
-        """打开视图"""
-        QMessageBox.information(self, "打开视图", f"打开视图功能开发中: {view_name}")
-    
-    def view_view_structure(self, view_name):
-        """查看视图结构"""
-        QMessageBox.information(self, "查看视图结构", f"查看视图结构功能开发中: {view_name}")
-    
-    def view_procedure(self, procedure_name):
-        """查看存储过程"""
-        QMessageBox.information(self, "查看存储过程", f"查看存储过程功能开发中: {procedure_name}")
-    
-    def open_table_data(self, table_name):
-        """打开表数据"""
-        # 创建新的标签页
-        tab_widget = QWidget()
-        tab_layout = QVBoxLayout(tab_widget)
-        
-        # 创建工具栏
-        toolbar = QWidget()
-        toolbar_layout = QHBoxLayout(toolbar)
-        
-        # 刷新按钮
-        refresh_btn = QPushButton("刷新")
-        refresh_btn.clicked.connect(lambda: self.refresh_table_data(data_table, table_name))
-        toolbar_layout.addWidget(refresh_btn)
-        
-        # 分隔符
-        toolbar_layout.addWidget(QFrame(frameShape=QFrame.Shape.VLine))
-        
-        # 数据操作按钮
-        add_btn = QPushButton("添加")
-        add_btn.clicked.connect(lambda: self.add_table_row(data_table))
-        toolbar_layout.addWidget(add_btn)
-        
-        delete_btn = QPushButton("删除")
-        delete_btn.clicked.connect(lambda: self.delete_table_row(data_table))
-        toolbar_layout.addWidget(delete_btn)
-        
-        save_btn = QPushButton("保存")
-        save_btn.clicked.connect(lambda: self.save_table_data(data_table, table_name))
-        toolbar_layout.addWidget(save_btn)
-        
-        # 分隔符
-        toolbar_layout.addWidget(QFrame(frameShape=QFrame.Shape.VLine))
-        
-        # 过滤功能
-        toolbar_layout.addWidget(QLabel("过滤:"))
-        filter_edit = QLineEdit()
-        filter_edit.setPlaceholderText("输入过滤条件")
-        filter_edit.textChanged.connect(lambda text: self.filter_table_data(data_table, text))
-        toolbar_layout.addWidget(filter_edit)
-        
-        toolbar_layout.addStretch()
-        
-        # 创建数据浏览表格
-        data_table = QTableWidget()
-        data_table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked)
-        data_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        data_table.setSortingEnabled(True)  # 启用排序
-        
-        tab_layout.addWidget(toolbar)
-        tab_layout.addWidget(data_table)
-        
-        # 添加标签页
-        tab_index = self.tabs.addTab(tab_widget, f"数据 - {table_name}")
-        self.tabs.setCurrentIndex(tab_index)
-        
-        # 加载实际的表数据
-        self.refresh_table_data(data_table, table_name)
-    
-    def refresh_table_data(self, table, table_name):
-        """刷新表数据"""
-        try:
-            if self.current_db_type == 'MySQL':
-                with self.db_connection.cursor() as cursor:
-                    # 查询表数据
-                    cursor.execute(f"SELECT * FROM {table_name} LIMIT 1000")
-                    results = cursor.fetchall()
-                    
-                    if results:
-                        # 设置列
-                        columns = list(results[0].keys())
-                        table.setColumnCount(len(columns))
-                        table.setHorizontalHeaderLabels(columns)
-                        
-                        # 添加数据
-                        table.setRowCount(len(results))
-                        for row_idx, row_data in enumerate(results):
-                            row_values = list(row_data.values())
-                            for col_idx, value in enumerate(row_values):
-                                item = QTableWidgetItem(str(value))
-                                table.setItem(row_idx, col_idx, item)
-                        
-                        # 调整列宽
-                        table.resizeColumnsToContents()
-                        self.status_info.setText(f"刷新表 {table_name} 数据成功，共 {len(results)} 条记录")
-                    else:
-                        # 清空表格
-                        table.setRowCount(0)
-                        table.setColumnCount(0)
-                        self.status_info.setText(f"表 {table_name} 无数据")
-        except Exception as e:
-            QMessageBox.critical(self, "刷新表数据", f"刷新表数据失败: {str(e)}")
-            self.logger.log('ERROR', f"刷新表数据失败: {str(e)}")
-    
-    def add_table_row(self, table):
-        """添加表行"""
-        row_count = table.rowCount()
-        table.insertRow(row_count)
-        
-        # 自动生成ID
-        new_id = row_count + 1
-        table.setItem(row_count, 0, QTableWidgetItem(str(new_id)))
-        
-        self.status_info.setText("添加新行成功")
-    
-    def delete_table_row(self, table):
-        """删除表行"""
-        selected_rows = table.selectionModel().selectedRows()
-        if not selected_rows:
-            QMessageBox.warning(self, "删除行", "请选择要删除的行")
-            return
-        
-        # 从后往前删除，避免索引变化
-        for row in sorted(selected_rows, key=lambda x: x.row(), reverse=True):
-            table.removeRow(row.row())
-        
-        self.status_info.setText(f"删除了 {len(selected_rows)} 行")
-    
-    def save_table_data(self, table, table_name):
-        """保存表数据"""
-        try:
-            if self.current_db_type == 'MySQL':
-                with self.db_connection.cursor() as cursor:
-                    # 清空表数据
-                    cursor.execute(f"DELETE FROM {table_name}")
-                    
-                    # 获取列名
-                    columns = [table.horizontalHeaderItem(i).text() for i in range(table.columnCount())]
-                    columns_str = ', '.join(columns)
-                    
-                    # 构建占位符
-                    placeholders = ', '.join(['%s'] * table.columnCount())
-                    
-                    # 构建插入语句
-                    sql = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders})"
-                    
-                    # 准备数据
-                    data = []
-                    for row_idx in range(table.rowCount()):
-                        row_data = []
-                        for col_idx in range(table.columnCount()):
-                            item = table.item(row_idx, col_idx)
-                            value = item.text() if item else ''
-                            # 处理空值
-                            if value == '':
-                                value = None
-                            row_data.append(value)
-                        data.append(row_data)
-                    
-                    # 执行批量插入
-                    if data:
-                        cursor.executemany(sql, data)
-                        self.db_connection.commit()
-                        QMessageBox.information(self, "保存数据", f"成功保存 {len(data)} 条记录到表 {table_name}")
-                        self.status_info.setText("数据保存成功")
-                    else:
-                        QMessageBox.information(self, "保存数据", "没有数据需要保存")
-        except Exception as e:
-            QMessageBox.critical(self, "保存数据", f"保存数据失败: {str(e)}")
-            self.logger.log('ERROR', f"保存数据失败: {str(e)}")
-    
-    def commit_transaction(self):
-        """提交事务"""
-        if hasattr(self, 'db_connection'):
-            try:
-                self.db_connection.commit()
-                QMessageBox.information(self, "提交事务", "事务提交成功")
-                self.status_info.setText("事务提交成功")
-                self.logger.log('INFO', "事务提交成功")
-            except Exception as e:
-                QMessageBox.critical(self, "提交事务", f"事务提交失败: {str(e)}")
-                self.logger.log('ERROR', f"事务提交失败: {str(e)}")
-    
-    def rollback_transaction(self):
-        """回滚事务"""
-        if hasattr(self, 'db_connection'):
-            try:
-                self.db_connection.rollback()
-                QMessageBox.information(self, "回滚事务", "事务回滚成功")
-                self.status_info.setText("事务回滚成功")
-                self.logger.log('INFO', "事务回滚成功")
-            except Exception as e:
-                QMessageBox.critical(self, "回滚事务", f"事务回滚失败: {str(e)}")
-                self.logger.log('ERROR', f"事务回滚失败: {str(e)}")
-    
-    def filter_table_data(self, table, filter_text):
-        """过滤表数据"""
-        if not filter_text:
-            # 显示所有行
-            for row_idx in range(table.rowCount()):
-                table.setRowHidden(row_idx, False)
-            return
-        
-        # 过滤数据
-        filter_text = filter_text.lower()
-        for row_idx in range(table.rowCount()):
-            match = False
-            for col_idx in range(table.columnCount()):
-                item = table.item(row_idx, col_idx)
-                if item and filter_text in item.text().lower():
-                    match = True
-                    break
-            table.setRowHidden(row_idx, not match)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
