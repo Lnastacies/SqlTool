@@ -1,0 +1,18 @@
+{
+  "connections": {
+    "M8": {
+      "type": "MySQL",
+      "host": "localhost",
+      "port": 3366,
+      "username": "root",
+      "password": "root",
+      "database": ""
+    }
+  },
+  "groups": {
+    "本地连接": [
+      "M8"
+    ],
+    "test": []
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "sqltool",
+  "version": "1.0.0",
+  "description": "SQL Tool - 类似Navicat的数据库管理工具",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["electron", "database", "sql", "navicat"],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "build": {
+    "appId": "com.sqltool.app",
+    "productName": "SQL Tool",
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    }
+  }
+}
