@@ -1,0 +1,21 @@
+# 构建文件
+build/
+dist/
+*.spec
+
+# 缓存文件
+__pycache__/
+*.pyc
+
+# 配置文件
+connections.json
+
+# 日志文件
+operation_log.txt
+
+# 测试文件
+1.sql
+
+# 其他
+.trae/
+*.bat
