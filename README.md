@@ -29,6 +29,13 @@
 - 表查看
 - （待实现：视图、存储过程、函数等）
 
+### 6. 界面设计
+- 类似Navicat的界面布局
+- 顶部菜单栏（文件、编辑、查看、收藏夹、工具、窗口、帮助）
+- 工具栏（连接、新建查询、表、视图、函数等）
+- 左侧面板（连接管理器、对象浏览器）
+- 中央工作区（SQL编辑器、结果显示）
+
 ## 安装说明
 
 ### 环境要求
@@ -51,7 +58,7 @@ pip install -r requirements.txt
 
 3. **运行程序**
 ```bash
-python sqltool.py
+python SqlTool.py
 ```
 
 ## 使用说明
@@ -82,12 +89,44 @@ python sqltool.py
 2. 在结果标签页点击"导出结果"按钮
 3. 选择导出格式（CSV或JSON）和保存路径
 
+## 项目结构
+
+```
+SqlTool/
+├── core/                # 核心功能模块
+│   ├── connection_manager.py     # 连接管理器
+│   ├── connection_pool.py        # 连接池
+│   ├── database_operations.py    # 数据库操作
+│   ├── metadata_fetcher.py       # 元数据获取
+│   ├── sql_executor.py           # SQL执行器
+│   └── sync_engine.py            # 同步引擎
+├── ui/                  # 界面模块
+│   ├── components/      # 界面组件
+│   │   ├── menu_toolbar.py       # 菜单和工具栏
+│   │   ├── connection_manager.py # 连接管理界面
+│   │   ├── sql_editor.py         # SQL编辑器
+│   │   └── ...
+│   ├── connection_dialog.py      # 连接对话框
+│   ├── import_export_wizard.py   # 导入导出向导
+│   └── main_window.py            # 主窗口
+├── utils/               # 工具模块
+│   ├── common_utils.py           # 通用工具
+│   └── logger.py                 # 日志工具
+├── .gitignore
+├── README.md
+├── SqlTool.py          # 主入口文件
+├── build.py            # 构建脚本
+└── requirements.txt    # 依赖文件
+```
+
 ## 开发计划
 
 - [x] 基本框架搭建
 - [x] 数据库连接功能
 - [x] SQL编辑器和执行
 - [x] 结果显示和导出
+- [x] 顶部菜单栏实现
+- [x] 工具栏实现
 - [ ] 语法高亮
 - [ ] 表结构编辑
 - [ ] 数据导入功能

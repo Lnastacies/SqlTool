@@ -1,0 +1,13 @@
+PyQt6
+QScintilla
+mysql-connector-python
+psycopg2-binary
+pyodbc
+mariadb
+pandas
+openpyxl
+cryptography
+paramiko
+matplotlib
+networkx
+PyInstaller

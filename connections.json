@@ -1,18 +1,30 @@
 {
   "connections": {
     "M8": {
+      "name": "M8",
       "type": "MySQL",
       "host": "localhost",
       "port": 3366,
       "username": "root",
-      "password": "root",
-      "database": ""
+      "password": "IhasI2rI5O7VRr+o5q+Af133rey4azMSH6ENzI2nEVh8cwXW",
+      "database": "",
+      "timeout": 30,
+      "charset": "utf8mb4",
+      "ssl_mode": 0,
+      "ssl_key": "",
+      "ssl_cert": "",
+      "ssl_ca": "",
+      "ssh_enabled": 0,
+      "ssh_host": "localhost",
+      "ssh_port": 22,
+      "ssh_username": "",
+      "ssh_password": "",
+      "group": "湖北农信"
     }
   },
   "groups": {
-    "本地连接": [
+    "湖北农信": [
       "M8"
-    ],
-    "test": []
+    ]
   }
 }

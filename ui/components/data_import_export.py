@@ -217,7 +217,7 @@ class DataImportExport:
         """
         # 打开文件保存对话框
         file_path, file_type = QFileDialog.getSaveFileName(
-            self.main_window, "保存导出文件", "", "CSV文件 (*.csv);;SQL文件 (*.sql);;Excel文件 (*.xlsx)")
+            self.main_window, "保存导出文件", "", "CSV文件 (*.csv);;SQL文件 (*.sql);;Excel文件 (*.xlsx);;JSON文件 (*.json);;TXT文件 (*.txt)")
         
         if not file_path:
             return
@@ -239,6 +239,10 @@ class DataImportExport:
                 self._export_sql(file_path, table_name)
             elif file_type == 'Excel文件 (*.xlsx)':
                 self._export_excel(file_path, table_name)
+            elif file_type == 'JSON文件 (*.json)':
+                self._export_json(file_path, table_name)
+            elif file_type == 'TXT文件 (*.txt)':
+                self._export_txt(file_path, table_name)
             
             self.main_window.status_info.setText("数据导出成功")
             self.logger.log('INFO', f"导出数据文件: {file_path}")
@@ -361,3 +365,65 @@ class DataImportExport:
             df.to_excel(file_path, index=False)
             
             QMessageBox.information(self.main_window, "导出Excel", f"成功导出 {len(results)} 条记录到文件 {file_path}")
+    
+    def _export_json(self, file_path, table_name):
+        """
+        导出JSON文件
+        """
+        import json
+        
+        with self.main_window.db_connection.cursor() as cursor:
+            # 查询表数据
+            cursor.execute(f"SELECT * FROM {table_name}")
+            results = cursor.fetchall()
+            
+            if not results:
+                QMessageBox.warning(self.main_window, "导出JSON", f"表 {table_name} 无数据")
+                return
+            
+            # 转换为字典列表
+            data = []
+            for row in results:
+                if isinstance(row, dict):
+                    data.append(row)
+                else:
+                    # 对于元组类型的结果，需要获取列名
+                    columns = [desc[0] for desc in cursor.description]
+                    data.append(dict(zip(columns, row)))
+            
+            # 写入JSON文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            QMessageBox.information(self.main_window, "导出JSON", f"成功导出 {len(results)} 条记录到文件 {file_path}")
+    
+    def _export_txt(self, file_path, table_name):
+        """
+        导出TXT文件
+        """
+        with self.main_window.db_connection.cursor() as cursor:
+            # 查询表数据
+            cursor.execute(f"SELECT * FROM {table_name}")
+            results = cursor.fetchall()
+            
+            if not results:
+                QMessageBox.warning(self.main_window, "导出TXT", f"表 {table_name} 无数据")
+                return
+            
+            # 获取列名
+            columns = [desc[0] for desc in cursor.description]
+            
+            # 写入TXT文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                # 写入列名
+                f.write('\t'.join(columns) + '\n')
+                
+                # 写入数据
+                for row in results:
+                    if isinstance(row, dict):
+                        row_data = [str(row.get(col, '')) for col in columns]
+                    else:
+                        row_data = [str(item) for item in row]
+                    f.write('\t'.join(row_data) + '\n')
+            
+            QMessageBox.information(self.main_window, "导出TXT", f"成功导出 {len(results)} 条记录到文件 {file_path}")

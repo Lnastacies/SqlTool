@@ -5,9 +5,59 @@
 
 import json
 import os
+import base64
 from PyQt6.QtWidgets import QTreeWidgetItem, QMessageBox, QInputDialog
 from PyQt6.QtCore import Qt
 from ui.connection_dialog import ConnectionDialog
+
+# 尝试导入Crypto模块，如果失败则使用简单的加密方法
+try:
+    from Crypto.Cipher import AES
+    from Crypto.Protocol.KDF import PBKDF2
+    from Crypto.Random import get_random_bytes
+    HAS_CRYPTO = True
+    # 密码加密相关
+    SALT = b'sqltool_salt_2026'
+    ITERATIONS = 100000
+    KEY_LENGTH = 32  # 256 bits
+    
+    # 生成密钥
+    def generate_key(password):
+        return PBKDF2(password, SALT, dkLen=KEY_LENGTH, count=ITERATIONS)
+    
+    # 加密密码
+    def encrypt_password(password, key):
+        cipher = AES.new(key, AES.MODE_GCM)
+        nonce = cipher.nonce
+        ciphertext, tag = cipher.encrypt_and_digest(password.encode('utf-8'))
+        return base64.b64encode(nonce + ciphertext + tag).decode('utf-8')
+    
+    # 解密密码
+    def decrypt_password(encrypted_password, key):
+        data = base64.b64decode(encrypted_password.encode('utf-8'))
+        nonce = data[:16]
+        ciphertext = data[16:-16]
+        tag = data[-16:]
+        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+        password = cipher.decrypt_and_verify(ciphertext, tag)
+        return password.decode('utf-8')
+    
+    # 默认密钥（实际应用中应该让用户设置主密码）
+    default_key = generate_key('sqltool_default_key_2026')
+except ImportError:
+    HAS_CRYPTO = False
+    # 简单的Base64编码作为备选方案
+    def generate_key(password):
+        return password.encode('utf-8')
+    
+    def encrypt_password(password, key):
+        return base64.b64encode(password.encode('utf-8')).decode('utf-8')
+    
+    def decrypt_password(encrypted_password, key):
+        return base64.b64decode(encrypted_password.encode('utf-8')).decode('utf-8')
+    
+    # 默认密钥
+    default_key = generate_key('sqltool_default_key_2026')
 
 class ConnectionManager:
     """
@@ -26,7 +76,22 @@ class ConnectionManager:
             try:
                 with open(conn_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    self.main_window.saved_connections = data.get('connections', {})
+                    connections = data.get('connections', {})
+                    # 解密密码
+                    for conn_name, conn_data in connections.items():
+                        if 'password' in conn_data and conn_data['password']:
+                            try:
+                                conn_data['password'] = decrypt_password(conn_data['password'], default_key)
+                            except Exception as e:
+                                self.logger.log('WARNING', f"解密密码失败: {e}")
+                                conn_data['password'] = ''
+                        if 'ssh_password' in conn_data and conn_data['ssh_password']:
+                            try:
+                                conn_data['ssh_password'] = decrypt_password(conn_data['ssh_password'], default_key)
+                            except Exception as e:
+                                self.logger.log('WARNING', f"解密SSH密码失败: {e}")
+                                conn_data['ssh_password'] = ''
+                    self.main_window.saved_connections = connections
                     self.main_window.connection_groups = data.get('groups', {})
             except Exception as e:
                 self.logger.log('ERROR', f"加载连接失败: {e}")
@@ -57,8 +122,17 @@ class ConnectionManager:
         """
         conn_file = "connections.json"
         try:
+            # 深拷贝连接数据，避免修改原始数据
+            import copy
+            connections = copy.deepcopy(self.main_window.saved_connections)
+            # 加密密码
+            for conn_name, conn_data in connections.items():
+                if 'password' in conn_data and conn_data['password']:
+                    conn_data['password'] = encrypt_password(conn_data['password'], default_key)
+                if 'ssh_password' in conn_data and conn_data['ssh_password']:
+                    conn_data['ssh_password'] = encrypt_password(conn_data['ssh_password'], default_key)
             data = {
-                'connections': self.main_window.saved_connections,
+                'connections': connections,
                 'groups': self.main_window.connection_groups
             }
             with open(conn_file, 'w', encoding='utf-8') as f:

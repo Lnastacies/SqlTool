@@ -26,9 +26,10 @@ from ui.components.query_tab import QueryTab
 from ui.components.database_objects import DatabaseObjectsManager
 from ui.components.sql_operations import SQLOperations
 from ui.components.data_import_export import DataImportExport
-from core.connection_management import ConnectionManager
+from ui.components.connection_manager import ConnectionManager
 from ui.components.left_panel import LeftPanel
 from ui.components.right_panel import RightPanel
+from ui.components.info_panel import InfoPanel
 from ui.components.menu_toolbar import MenuToolbarManager
 from ui.components.event_handler import EventHandler
 from ui.connection_dialog import ConnectionDialog
@@ -39,7 +40,8 @@ class NavicatStyleSQLTool(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Navicat Style - 数据库管理工具")
-        self.setGeometry(100, 100, 1400, 900)
+        self.setGeometry(100, 100, 1496, 960)
+        self.setMinimumSize(1024, 768)
 
         # 初始化变量
         self.current_connection = None
@@ -49,17 +51,22 @@ class NavicatStyleSQLTool(QMainWindow):
         self.logger = OperationLogger()
         self.connection_groups = {}
         self.dark_mode = False
+        self.theme = 'light'  # light, dark, high_contrast
         # 初始化连接池
         self.connection_pool = ConnectionPool(max_connections=5)
 
         # 初始化连接管理器
-        self.connection_manager = ConnectionManager()
+        self.connection_manager = ConnectionManager(self)
+        # 加载保存的连接
+        self.connection_manager.load_connections()
         # 初始化事件处理器
         self.event_handler = EventHandler(self)
         # 初始化左侧面板
         self.left_panel = LeftPanel(self)
-        # 初始化右侧面板
+        # 初始化中央工作区
         self.right_panel = RightPanel(self)
+        # 初始化右侧信息面板
+        self.info_panel = InfoPanel(self)
         # 初始化菜单工具栏管理器
         self.menu_toolbar_manager = MenuToolbarManager(self)
         # 初始化数据库操作对象
@@ -72,17 +79,24 @@ class NavicatStyleSQLTool(QMainWindow):
         self.sql_operations = SQLOperations(self)
         # 初始化数据导入导出对象
         self.data_import_export = DataImportExport(self)
-        
-        # 加载保存的连接
-        self.connection_manager.load_connections()
-        # 将连接信息复制到实例变量中，以便其他组件使用
-        self.saved_connections = self.connection_manager.saved_connections
-        self.connection_groups = self.connection_manager.connection_groups
 
         # 创建主布局
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
+        # 设置主布局边距为0，确保菜单栏紧贴窗口顶部
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 消除QMainWindow的默认标题栏边距
+        self.setContentsMargins(0, 0, 0, 0)
+        
+        # 隐藏默认的菜单栏，避免占用空间
+        menu_bar = self.menuBar()
+        if menu_bar:
+            menu_bar.hide()
+        
+        # 尝试消除顶部空白区域
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.FramelessWindowHint)
 
         # 创建菜单栏
         self.menu_toolbar_manager.create_menu_bar()
@@ -92,19 +106,42 @@ class NavicatStyleSQLTool(QMainWindow):
 
         # 创建主分割器
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        # 设置分割器样式，确保可拖拽
+        self.main_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #E0E0E0;
+                width: 4px;
+                height: 4px;
+            }
+            QSplitter::handle:hover {
+                background-color: #007ACC;
+            }
+        """)
         self.main_layout.addWidget(self.main_splitter)
 
         # 创建左侧面板（连接管理器 + 对象浏览器）
         self.create_left_panel()
 
-        # 创建右侧面板（标签页 + 状态栏）
+        # 创建中央工作区（标签页）
         self.create_right_panel()
 
-        # 设置分割器比例
-        self.main_splitter.setSizes([200, 1200])
+        # 创建右侧信息面板
+        self.create_info_panel()
+
+        # 设置分割器比例，确保初始宽度分别为280px、剩余宽度、300px
+        # 计算中央工作区宽度：总宽度 - 左侧280px - 右侧300px
+        central_width = max(100, self.width() - 580)  # 确保中央工作区至少有100px
+        self.main_splitter.setSizes([280, central_width, 300])
 
         # 创建状态栏
         self.create_status_bar()
+
+        # 窗口显示后检查菜单栏状态
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, self.check_menu_bar_visibility)
+
+        # 设置默认主题
+        self.set_theme('light')
 
         print("Navicat Style SQLTool初始化完成")
 
@@ -119,82 +156,177 @@ class NavicatStyleSQLTool(QMainWindow):
         self.left_panel.load_connections_to_tree()
 
     def create_right_panel(self):
-        """创建右侧面板"""
-        # 添加右侧面板到主分割器
+        """创建中央工作区"""
+        # 添加中央工作区到主分割器
         self.main_splitter.addWidget(self.right_panel)
 
         # 添加默认标签页
         self.right_panel.add_new_query_tab()
 
+    def create_info_panel(self):
+        """创建右侧信息面板"""
+        # 添加右侧信息面板到主分割器
+        self.main_splitter.addWidget(self.info_panel)
+
     def create_status_bar(self):
-        """创建状态栏"""
+        """
+        创建状态栏
+        """
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
 
         # 设置状态栏样式
         self.status_bar.setStyleSheet("""
             QStatusBar {
-                background-color: #f0f0f0;
-                border-top: 1px solid #d0d0d0;
+                background-color: #F0F0F0;
+                border-top: 1px solid #D0D0D0;
                 font-size: 11px;
-                font-family: 'Microsoft YaHei', Arial;
+                font-family: 'Segoe UI';
                 padding: 4px 12px;
-                min-height: 30px;
+                min-height: 24px;
+                height: 24px;
             }
             QStatusBar QLabel {
                 margin-right: 20px;
-                color: #333;
+                color: #333333;
                 padding: 2px 0;
             }
         """)
 
         # 连接状态
-        self.connection_status = QLabel("未连接")
+        self.connection_status = QLabel("✅ 未连接")
         self.status_bar.addWidget(self.connection_status)
 
+        # 当前数据库
+        self.current_db_label = QLabel("数据库: 未选择")
+        self.status_bar.addWidget(self.current_db_label)
+
+        # 当前模式
+        self.current_schema_label = QLabel("模式: 无")
+        self.status_bar.addWidget(self.current_schema_label)
+
         # 执行时间
-        self.execution_time = QLabel("")
+        self.execution_time = QLabel("执行时间: 0.0000 秒")
         self.status_bar.addWidget(self.execution_time)
 
         # 记录数
-        self.record_count = QLabel("")
+        self.record_count = QLabel("记录数: 0")
         self.status_bar.addWidget(self.record_count)
 
+        # 光标位置
+        self.cursor_position = QLabel("行: 1 / 列: 1")
+        self.status_bar.addWidget(self.cursor_position)
+
+        # 右侧工具按钮
+        from PyQt6.QtWidgets import QPushButton
+        
+        # 设置按钮
+        settings_button = QPushButton("⚙️")
+        settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                padding: 0 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #E3F2FD;
+            }
+        """)
+        settings_button.setToolTip("设置")
+        self.status_bar.addPermanentWidget(settings_button)
+
+        # 刷新按钮
+        refresh_button = QPushButton("🔄")
+        refresh_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                padding: 0 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #E3F2FD;
+            }
+        """)
+        refresh_button.setToolTip("刷新")
+        refresh_button.clicked.connect(self.event_handler.refresh_objects)
+        self.status_bar.addPermanentWidget(refresh_button)
+
+        # 视图切换按钮
+        list_view_button = QPushButton("☰")
+        list_view_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                padding: 0 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #E3F2FD;
+            }
+        """)
+        list_view_button.setToolTip("列表视图")
+        self.status_bar.addPermanentWidget(list_view_button)
+
+        details_view_button = QPushButton("📋")
+        details_view_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                padding: 0 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #E3F2FD;
+            }
+        """)
+        details_view_button.setToolTip("详细信息视图")
+        self.status_bar.addPermanentWidget(details_view_button)
+
+        icon_view_button = QPushButton("🖼️")
+        icon_view_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                padding: 0 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #E3F2FD;
+            }
+        """)
+        icon_view_button.setToolTip("大图标视图")
+        self.status_bar.addPermanentWidget(icon_view_button)
+        
         # 右下角信息
         self.status_info = QLabel("就绪")
         self.status_bar.addPermanentWidget(self.status_info)
+        
+        # 加载动画
+        self.loading_timer = QTimer()
+        self.loading_timer.timeout.connect(self.update_loading_status)
+        self.loading_icons = ['|', '/', '-', '\\']
+        self.loading_index = 0
 
+    def check_menu_bar_visibility(self):
+        """检查菜单栏可见性"""
+        if self.menuBar():
+            print(f"默认菜单栏可见性: {self.menuBar().isVisible()}, 几何: {self.menuBar().geometry()}")
+        else:
+            print("默认菜单栏不存在")
+        
+        # 检查自定义菜单栏
+        if hasattr(self.menu_toolbar_manager, 'menu_bar_widget'):
+            menu_bar = self.menu_toolbar_manager.menu_bar_widget
+            print(f"自定义菜单栏可见性: {menu_bar.isVisible()}, 几何: {menu_bar.geometry()}")
+        else:
+            print("自定义菜单栏不存在")
+    
     def load_connections(self):
         """加载保存的连接"""
-        conn_file = "connections.json"
-        if os.path.exists(conn_file):
-            try:
-                with open(conn_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self.saved_connections = data.get('connections', {})
-                    self.connection_groups = data.get('groups', {})
-            except Exception as e:
-                self.logger.log('ERROR', f"加载连接失败: {e}")
-        else:
-            # 示例连接
-            self.saved_connections = {
-                'Local MySQL': {
-                    'type': 'MySQL',
-                    'host': 'localhost',
-                    'port': 3306,
-                    'username': 'root',
-                    'password': '',
-                    'database': ''
-                },
-                'Local PostgreSQL': {
-                    'type': 'PostgreSQL',
-                    'host': 'localhost',
-                    'port': 5432,
-                    'username': 'postgres',
-                    'password': '',
-                    'database': ''
-                }
-            }
+        # 直接使用 connection_manager 加载连接
+        self.connection_manager.load_connections()
 
     def load_connections_to_tree(self, show_only_current=False):
         """加载连接到树"""
@@ -437,86 +569,625 @@ class NavicatStyleSQLTool(QMainWindow):
             self.connection_pool.close_all_connections()
             self.logger.log('INFO', "关闭所有数据库连接")
         event.accept()
-
-
-    def on_object_context_menu(self, pos):
-        """对象上下文菜单"""
-        # 获取当前选中的项
-        item = self.left_panel.object_tree.itemAt(pos)
-        if not item:
-            return
-
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not data:
-            return
-
-        item_type, item_name = data
-        menu = QMenu()
-
-        # 表对象的右键菜单
-        if item_type == 'table':
-            # 基本操作
-            menu.addAction("打开表", lambda: self.event_handler.open_table(item_name))
-            menu.addAction("设计表", lambda: self.table_operations.design_table(item_name))
-            menu.addAction("新建表", self.event_handler.new_table)
-            menu.addSeparator()
-            menu.addAction("删除表", lambda: self.event_handler.delete_table(item_name))
-            menu.addAction("清空表", lambda: self.event_handler.truncate_table(item_name, False))
-            menu.addAction("截断表", lambda: self.event_handler.truncate_table(item_name, True))
-            menu.addSeparator()
-
-            # 复制操作
-            copy_menu = menu.addMenu("复制表")
-            copy_menu.addAction("结构和数据", lambda: self.event_handler.copy_table(item_name, True, True))
-            copy_menu.addAction("仅结构", lambda: self.event_handler.copy_table(item_name, True, False))
-            copy_menu.addAction("仅数据", lambda: self.event_handler.copy_table(item_name, False, True))
-
-            menu.addSeparator()
-            menu.addAction("设置权限", lambda: self.event_handler.show_feature_not_implemented("设置权限"))
-            menu.addSeparator()
-            menu.addAction("导入向导...", self.event_handler.import_data)
-            menu.addAction("导出向导...", self.event_handler.export_data)
-            menu.addSeparator()
-
-            # 转储SQL文件
-            dump_menu = menu.addMenu("转储 SQL 文件")
-            dump_menu.addAction("结构和数据", lambda: self.event_handler.dump_sql(item_name, True, True))
-            dump_menu.addAction("仅结构", lambda: self.event_handler.dump_sql(item_name, True, False))
-            dump_menu.addAction("仅数据", lambda: self.event_handler.dump_sql(item_name, False, True))
-
-            menu.addSeparator()
-            menu.addAction("打印表", lambda: self.event_handler.show_feature_not_implemented("打印表"))
-            menu.addSeparator()
-
-            # 维护
-            maintenance_menu = menu.addMenu("维护")
-            maintenance_menu.addAction("分析表", lambda: self.event_handler.maintain_table(item_name, "ANALYZE"))
-            maintenance_menu.addAction("检查表", lambda: self.event_handler.maintain_table(item_name, "CHECK"))
-            maintenance_menu.addAction("优化表", lambda: self.event_handler.maintain_table(item_name, "OPTIMIZE"))
-            maintenance_menu.addAction("修复表", lambda: self.event_handler.maintain_table(item_name, "REPAIR"))
-
-            menu.addSeparator()
-            menu.addAction("逆向表到模型...", lambda: self.event_handler.show_feature_not_implemented("逆向表到模型"))
-            menu.addSeparator()
-
-            # 管理组
-            group_menu = menu.addMenu("管理组")
-            group_menu.addAction("添加到组", lambda: self.event_handler.show_feature_not_implemented("添加到组"))
-            group_menu.addAction("从组移除", lambda: self.event_handler.show_feature_not_implemented("从组移除"))
-
-            menu.addSeparator()
-            menu.addAction("复制", lambda: self.event_handler.show_feature_not_implemented("复制"))
-            menu.addAction("重命名", lambda: self.event_handler.rename_table(item_name))
-            menu.addAction("创建打开表快捷方式...", lambda: self.event_handler.show_feature_not_implemented("创建打开表快捷方式"))
-            menu.addSeparator()
-            menu.addAction("刷新", self.event_handler.refresh_objects)
-            menu.addSeparator()
-            menu.addAction("对象信息", lambda: self.event_handler.show_table_info(item_name))
-        # 其他对象类型的右键菜单
+    
+    def set_theme(self, theme):
+        """设置主题"""
+        self.theme = theme
+        self.apply_theme()
+    
+    def apply_theme(self):
+        """应用主题"""
+        if self.theme == 'dark':
+            self.apply_dark_theme()
+        elif self.theme == 'high_contrast':
+            self.apply_high_contrast_theme()
         else:
-            menu.addAction("刷新", self.event_handler.refresh_objects)
+            self.apply_light_theme()
+    
+    def apply_light_theme(self):
+        """
+        应用浅色主题
+        """
+        # 主窗口样式
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #FFFFFF;
+            }
+            QWidget {
+                background-color: #FFFFFF;
+                color: #333333;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                font-size: 12px;
+            }
+            QMenuBar {
+                background-color: #F8F9FA;
+                border-bottom: 1px solid #E0E0E0;
+                height: 30px;
+            }
+            QMenuBar::item {
+                padding: 4px 12px;
+                color: #333333;
+            }
+            QMenuBar::item:selected {
+                background-color: #007ACC;
+                color: #FFFFFF;
+            }
+            QToolBar {
+                background-color: #FFFFFF;
+                border-bottom: 1px solid #E0E0E0;
+                height: 40px;
+                padding: 4px;
+                spacing: 4px;
+            }
+            QToolButton {
+                background-color: transparent;
+                border: none;
+                padding: 6px;
+                border-radius: 2px;
+                margin: 0 2px;
+            }
+            QToolButton:hover {
+                background-color: #E3F2FD;
+            }
+            QToolButton:pressed {
+                background-color: #BBDEFB;
+            }
+            QSplitter::handle {
+                background-color: #E0E0E0;
+                width: 4px;
+                height: 4px;
+            }
+            QSplitter::handle:hover {
+                background-color: #007ACC;
+            }
+            QTreeWidget {
+                background-color: #FFFFFF;
+                border: none;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                font-size: 12px;
+            }
+            QTreeWidget::item {
+                padding: 3px 0;
+                height: 24px;
+            }
+            QTreeWidget::item:hover {
+                background-color: #E3F2FD;
+            }
+            QTreeWidget::item:selected {
+                background-color: #E3F2FD;
+                color: #333333;
+            }
+            QTabWidget::pane {
+                border: 1px solid #E0E0E0;
+                background-color: #FFFFFF;
+            }
+            QTabBar::tab {
+                padding: 8px 16px;
+                font-size: 12px;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                background-color: #F8F9FA;
+                border: none;
+                border-bottom: 2px solid transparent;
+                margin-right: 2px;
+                height: 32px;
+            }
+            QTabBar::tab:selected {
+                background-color: #FFFFFF;
+                border-bottom: 2px solid #007ACC;
+                font-weight: normal;
+            }
+            QTabBar::tab:hover {
+                background-color: #E3F2FD;
+            }
+            QTableWidget {
+                background-color: #FFFFFF;
+                border: 1px solid #E0E0E0;
+                font-size: 12px;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                gridline-color: #f0f0f0;
+            }
+            QTableWidget QHeaderView::section {
+                background-color: #f8f8f8;
+                border: 1px solid #e0e0e0;
+                padding: 4px 8px;
+                font-size: 12px;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                font-weight: bold;
+                text-align: left;
+            }
+            QTableWidget::item {
+                padding: 4px 8px;
+                height: 24px;
+                border: 1px solid transparent;
+            }
+            QTableWidget::item:hover {
+                background-color: #f5f5f5;
+            }
+            QTableWidget::item:selected {
+                background-color: #e3f2fd;
+                color: #333333;
+                border: 1px solid #bbdefb;
+            }
+            QTableWidget::alternatingRowColors {
+                background-color: #F8F9FA;
+            }
+            QPushButton {
+                background-color: #F8F9FA;
+                border: 1px solid #E0E0E0;
+                border-radius: 2px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+            }
+            QPushButton:hover {
+                background-color: #E3F2FD;
+                border-color: #007ACC;
+            }
+            QPushButton:pressed {
+                background-color: #007ACC;
+                color: #FFFFFF;
+            }
+            QPushButton[style="primary"] {
+                background-color: #2ECC71;
+                color: white;
+                border: 1px solid #27AE60;
+            }
+            QPushButton[style="danger"] {
+                background-color: #E74C3C;
+                color: white;
+                border: 1px solid #C0392B;
+            }
+            QLineEdit {
+                border: 1px solid #E0E0E0;
+                border-radius: 2px;
+                padding: 6px 8px;
+                background-color: #FFFFFF;
+                font-size: 12px;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                height: 28px;
+            }
+            QLineEdit:focus {
+                border-color: #007ACC;
+                outline: none;
+            }
+            QComboBox {
+                border: 1px solid #E0E0E0;
+                border-radius: 2px;
+                padding: 6px 8px;
+                background-color: #FFFFFF;
+                font-size: 12px;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+            }
+            QComboBox:focus {
+                border-color: #007ACC;
+                outline: none;
+            }
+            QTextEdit {
+                border: 1px solid #E0E0E0;
+                border-radius: 2px;
+                padding: 6px 8px;
+                background-color: #FFFFFF;
+                font-size: 12px;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+            }
+            QTextEdit:focus {
+                border-color: #007ACC;
+                outline: none;
+            }
+        """)
+        
+        # 左侧面板样式
+        if hasattr(self, 'left_panel'):
+            self.left_panel.setStyleSheet("""
+                QWidget {
+                    background-color: #FFFFFF;
+                    color: #333333;
+                }
+                QGroupBox {
+                    border: 1px solid #E0E0E0;
+                    border-radius: 2px;
+                    margin-top: 8px;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    top: -6px;
+                    padding: 0 4px;
+                    background-color: #FFFFFF;
+                }
+            """)
+        
+        # 右侧面板样式
+        if hasattr(self, 'right_panel'):
+            self.right_panel.setStyleSheet("""
+                QWidget {
+                    background-color: #FFFFFF;
+                    color: #333333;
+                }
+            """)
+        
+        # 状态栏样式
+        if hasattr(self, 'status_bar'):
+            self.status_bar.setStyleSheet("""
+                QStatusBar {
+                    background-color: #F8F9FA;
+                    border-top: 1px solid #E0E0E0;
+                    font-size: 11px;
+                    font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                    padding: 4px 12px;
+                    min-height: 24px;
+                }
+                QStatusBar QLabel {
+                    margin-right: 20px;
+                    color: #333333;
+                    padding: 2px 0;
+                }
+            """)
+    
+    def apply_dark_theme(self):
+        """应用深色主题"""
+        # 主窗口样式
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #1E1E1E;
+            }
+            QWidget {
+                background-color: #1E1E1E;
+                color: #D4D4D4;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                font-size: 12px;
+            }
+            QMenuBar {
+                background-color: #252526;
+                border-bottom: 1px solid #3C3C3C;
+                height: 30px;
+            }
+            QMenuBar::item {
+                padding: 4px 12px;
+                color: #D4D4D4;
+            }
+            QMenuBar::item:selected {
+                background-color: #007ACC;
+                color: #FFFFFF;
+            }
+            QToolBar {
+                background-color: #252526;
+                border-bottom: 1px solid #3C3C3C;
+                height: 40px;
+            }
+            QToolButton {
+                background-color: transparent;
+                border: none;
+                padding: 6px;
+                border-radius: 2px;
+            }
+            QToolButton:hover {
+                background-color: #3C3C3C;
+            }
+            QToolButton:pressed {
+                background-color: #007ACC;
+            }
+            QSplitter::handle {
+                background-color: #3C3C3C;
+                width: 4px;
+                height: 4px;
+            }
+            QSplitter::handle:hover {
+                background-color: #007ACC;
+            }
+            QTreeWidget {
+                background-color: #1E1E1E;
+                border: 1px solid #3C3C3C;
+            }
+            QTreeWidget::item {
+                padding: 4px;
+            }
+            QTreeWidget::item:hover {
+                background-color: #3C3C3C;
+            }
+            QTreeWidget::item:selected {
+                background-color: #007ACC;
+                color: #FFFFFF;
+            }
+            QTabWidget::pane {
+                border: 1px solid #3C3C3C;
+            }
+            QTabBar::tab {
+                padding: 8px 16px;
+                border: 1px solid #3C3C3C;
+                border-bottom: none;
+                background-color: #252526;
+                color: #D4D4D4;
+            }
+            QTabBar::tab:selected {
+                background-color: #1E1E1E;
+                border-top: 2px solid #007ACC;
+                color: #D4D4D4;
+            }
+            QTableWidget {
+                background-color: #1E1E1E;
+                border: 1px solid #3C3C3C;
+            }
+            QTableWidget::item {
+                padding: 4px;
+            }
+            QTableWidget::item:selected {
+                background-color: #007ACC;
+                color: #FFFFFF;
+            }
+            QTableWidget::alternatingRowColors {
+                background-color: #252526;
+            }
+            QPushButton {
+                background-color: #252526;
+                border: 1px solid #3C3C3C;
+                border-radius: 2px;
+                padding: 6px 12px;
+                color: #D4D4D4;
+            }
+            QPushButton:hover {
+                background-color: #3C3C3C;
+                border-color: #007ACC;
+            }
+            QPushButton:pressed {
+                background-color: #007ACC;
+                color: #FFFFFF;
+            }
+            QLineEdit {
+                border: 1px solid #3C3C3C;
+                border-radius: 2px;
+                padding: 6px;
+                background-color: #252526;
+                color: #D4D4D4;
+            }
+            QLineEdit:focus {
+                border-color: #007ACC;
+            }
+            QComboBox {
+                border: 1px solid #3C3C3C;
+                border-radius: 2px;
+                padding: 6px;
+                background-color: #252526;
+                color: #D4D4D4;
+            }
+            QComboBox:focus {
+                border-color: #007ACC;
+            }
+        """)
+        
+        # 左侧面板样式
+        if hasattr(self, 'left_panel'):
+            self.left_panel.setStyleSheet("""
+                QWidget {
+                    background-color: #1E1E1E;
+                    color: #D4D4D4;
+                }
+                QGroupBox {
+                    border: 1px solid #3C3C3C;
+                    border-radius: 2px;
+                    margin-top: 8px;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    top: -6px;
+                    padding: 0 4px;
+                    background-color: #1E1E1E;
+                    color: #D4D4D4;
+                }
+            """)
+        
+        # 右侧面板样式
+        if hasattr(self, 'right_panel'):
+            self.right_panel.setStyleSheet("""
+                QWidget {
+                    background-color: #1E1E1E;
+                    color: #D4D4D4;
+                }
+            """)
+        
+        # 状态栏样式
+        if hasattr(self, 'status_bar'):
+            self.status_bar.setStyleSheet("""
+                QStatusBar {
+                    background-color: #252526;
+                    border-top: 1px solid #3C3C3C;
+                    font-size: 11px;
+                    font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                    padding: 4px 12px;
+                    min-height: 24px;
+                    color: #D4D4D4;
+                }
+                QStatusBar QLabel {
+                    margin-right: 20px;
+                    color: #D4D4D4;
+                    padding: 2px 0;
+                }
+            """)
+    
+    def apply_high_contrast_theme(self):
+        """应用高对比度主题"""
+        # 主窗口样式
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #000000;
+            }
+            QWidget {
+                background-color: #000000;
+                color: #FFFFFF;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                font-size: 12px;
+            }
+            QMenuBar {
+                background-color: #222222;
+                border-bottom: 1px solid #444444;
+                height: 30px;
+            }
+            QMenuBar::item {
+                padding: 4px 12px;
+                color: #FFFFFF;
+            }
+            QMenuBar::item:selected {
+                background-color: #007ACC;
+                color: #FFFFFF;
+            }
+            QToolBar {
+                background-color: #222222;
+                border-bottom: 1px solid #444444;
+                height: 40px;
+            }
+            QToolButton {
+                background-color: transparent;
+                border: none;
+                padding: 6px;
+                border-radius: 2px;
+            }
+            QToolButton:hover {
+                background-color: #444444;
+            }
+            QToolButton:pressed {
+                background-color: #007ACC;
+            }
+            QSplitter::handle {
+                background-color: #444444;
+                width: 4px;
+                height: 4px;
+            }
+            QSplitter::handle:hover {
+                background-color: #007ACC;
+            }
+            QTreeWidget {
+                background-color: #000000;
+                border: 1px solid #444444;
+            }
+            QTreeWidget::item {
+                padding: 4px;
+            }
+            QTreeWidget::item:hover {
+                background-color: #444444;
+            }
+            QTreeWidget::item:selected {
+                background-color: #007ACC;
+                color: #FFFFFF;
+            }
+            QTabWidget::pane {
+                border: 1px solid #444444;
+            }
+            QTabBar::tab {
+                padding: 8px 16px;
+                border: 1px solid #444444;
+                border-bottom: none;
+                background-color: #222222;
+                color: #FFFFFF;
+            }
+            QTabBar::tab:selected {
+                background-color: #000000;
+                border-top: 2px solid #007ACC;
+                color: #FFFFFF;
+            }
+            QTableWidget {
+                background-color: #000000;
+                border: 1px solid #444444;
+            }
+            QTableWidget::item {
+                padding: 4px;
+            }
+            QTableWidget::item:selected {
+                background-color: #007ACC;
+                color: #FFFFFF;
+            }
+            QTableWidget::alternatingRowColors {
+                background-color: #222222;
+            }
+            QPushButton {
+                background-color: #222222;
+                border: 1px solid #444444;
+                border-radius: 2px;
+                padding: 6px 12px;
+                color: #FFFFFF;
+            }
+            QPushButton:hover {
+                background-color: #444444;
+                border-color: #007ACC;
+            }
+            QPushButton:pressed {
+                background-color: #007ACC;
+                color: #FFFFFF;
+            }
+            QLineEdit {
+                border: 1px solid #444444;
+                border-radius: 2px;
+                padding: 6px;
+                background-color: #222222;
+                color: #FFFFFF;
+            }
+            QLineEdit:focus {
+                border-color: #007ACC;
+            }
+            QComboBox {
+                border: 1px solid #444444;
+                border-radius: 2px;
+                padding: 6px;
+                background-color: #222222;
+                color: #FFFFFF;
+            }
+            QComboBox:focus {
+                border-color: #007ACC;
+            }
+        """)
+        
+        # 左侧面板样式
+        if hasattr(self, 'left_panel'):
+            self.left_panel.setStyleSheet("""
+                QWidget {
+                    background-color: #000000;
+                    color: #FFFFFF;
+                }
+                QGroupBox {
+                    border: 1px solid #444444;
+                    border-radius: 2px;
+                    margin-top: 8px;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    top: -6px;
+                    padding: 0 4px;
+                    background-color: #000000;
+                    color: #FFFFFF;
+                }
+            """)
+        
+        # 右侧面板样式
+        if hasattr(self, 'right_panel'):
+            self.right_panel.setStyleSheet("""
+                QWidget {
+                    background-color: #000000;
+                    color: #FFFFFF;
+                }
+            """)
+        
+        # 状态栏样式
+        if hasattr(self, 'status_bar'):
+            self.status_bar.setStyleSheet("""
+                QStatusBar {
+                    background-color: #222222;
+                    border-top: 1px solid #444444;
+                    font-size: 11px;
+                    font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                    padding: 4px 12px;
+                    min-height: 24px;
+                    color: #FFFFFF;
+                }
+                QStatusBar QLabel {
+                    margin-right: 20px;
+                    color: #FFFFFF;
+                    padding: 2px 0;
+                }
+            """)
 
-        menu.exec(self.left_panel.object_tree.mapToGlobal(pos))
+
+
 
     def on_object_clicked(self, item, column):
         """对象点击事件"""
@@ -526,6 +1197,30 @@ class NavicatStyleSQLTool(QMainWindow):
             if item_type in ['tables', 'views', 'procedures', 'functions', 'events', 'queries', 'reports', 'backups']:
                 # 显示对象明细
                 self.show_object_details(item_type, item_name)
+            elif item_type == 'table':
+                # 显示表的详细信息
+                object_info = {
+                    'created': '',
+                    'updated': '',
+                    'fields': [],
+                    'indexes': [],
+                    'foreign_keys': [],
+                    'ddl': ''
+                }
+                try:
+                    # 使用DatabaseOperations类获取表信息
+                    if hasattr(self, 'database_operations') and self.database_operations:
+                        table_info = self.database_operations.get_table_info(item_name)
+                        object_info.update(table_info)
+                    else:
+                        # 如果database_operations未初始化，创建一个实例
+                        self.database_operations = DatabaseOperations(self.db_connection, self.current_db_type)
+                        table_info = self.database_operations.get_table_info(item_name)
+                        object_info.update(table_info)
+                except Exception as e:
+                    self.logger.log('ERROR', f"加载表信息失败: {str(e)}")
+                # 更新信息面板
+                self.info_panel.update_info('表', item_name, object_info)
 
     def on_object_double_clicked(self, item, column):
         """对象双击事件"""
@@ -540,6 +1235,9 @@ class NavicatStyleSQLTool(QMainWindow):
                     QMessageBox.warning(self, "切换数据库失败", "数据库名称为空")
                     return
                 try:
+                    # 开始加载动画
+                    self.start_loading("正在切换数据库...")
+                    
                     # 验证数据库名称
                     if not isinstance(item_name, str) or not item_name.strip():
                         self.logger.log('ERROR', f"无效的数据库名称: {item_name}")
@@ -554,7 +1252,9 @@ class NavicatStyleSQLTool(QMainWindow):
                         self.current_db = item_name
                         self.logger.log('INFO', f"当前数据库已设置为: {self.current_db}")
                         # 更新连接状态
-                        self.connection_status.setText(f"已连接: {self.current_connection} ({self.current_db_type}) - 数据库: {item_name}")
+                        self.connection_status.setText(f"已连接: {self.current_connection} ({self.current_db_type})")
+                        self.current_db_label.setText(f"数据库: {item_name}")
+                        self.current_schema_label.setText(f"模式: public")  # 默认模式
                         self.status_info.setText("已切换数据库")
                         self.logger.log('INFO', f"切换到数据库: {item_name} 成功")
                         # 强制刷新界面
@@ -574,6 +1274,9 @@ class NavicatStyleSQLTool(QMainWindow):
                 except Exception as e:
                     self.logger.log('ERROR', f"切换数据库失败: {str(e)}, 数据库名称: '{item_name}'")
                     QMessageBox.critical(self, "切换数据库失败", f"切换到数据库 {item_name} 时出错: {str(e)}")
+                finally:
+                    # 停止加载动画
+                    self.stop_loading()
             elif item_type == 'table':
                 # 打开表
                 self.event_handler.open_table(item_name)
@@ -586,6 +1289,26 @@ class NavicatStyleSQLTool(QMainWindow):
             elif item_type == 'function':
                 # 打开函数
                 self.event_handler.show_feature_not_implemented("打开函数")
+    
+    def start_loading(self, message="加载中..."):
+        """开始加载动画"""
+        self.status_info.setText(f"{message} {self.loading_icons[0]}")
+        self.loading_timer.start(200)
+    
+    def stop_loading(self):
+        """停止加载动画"""
+        self.loading_timer.stop()
+        self.status_info.setText("就绪")
+    
+    def update_loading_status(self):
+        """更新加载状态"""
+        self.loading_index = (self.loading_index + 1) % len(self.loading_icons)
+        current_text = self.status_info.text()
+        if ' ' in current_text:
+            message = current_text.rsplit(' ', 1)[0]
+        else:
+            message = current_text
+        self.status_info.setText(f"{message} {self.loading_icons[self.loading_index]}")
 
     def show_object_details(self, object_type, database_name):
         """显示对象明细"""

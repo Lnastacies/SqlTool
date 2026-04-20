@@ -94,36 +94,33 @@ class TableDesigner(QDialog):
         bottom_widget = QWidget()
         bottom_layout = QHBoxLayout(bottom_widget)
         
-        # 默认值
-        default_group = QGroupBox("默认")
-        default_layout = QVBoxLayout(default_group)
-        default_combo = QComboBox()
-        default_combo.addItem("utf8mb4")
-        default_layout.addWidget(default_combo)
-        bottom_layout.addWidget(default_group)
-        
         # 字符集
         charset_group = QGroupBox("字符集")
         charset_layout = QVBoxLayout(charset_group)
-        charset_combo = QComboBox()
-        charset_combo.addItem("utf8mb4_general_ci")
-        charset_layout.addWidget(charset_combo)
+        self.charset_combo = QComboBox()
+        self.charset_combo.addItems(["utf8mb4", "utf8", "latin1"])
+        self.charset_combo.setCurrentText("utf8mb4")
+        charset_layout.addWidget(self.charset_combo)
         bottom_layout.addWidget(charset_group)
         
         # 排序规则
         collation_group = QGroupBox("排序规则")
         collation_layout = QVBoxLayout(collation_group)
-        collation_combo = QComboBox()
-        collation_combo.addItem("utf8mb4_general_ci")
-        collation_layout.addWidget(collation_combo)
+        self.collation_combo = QComboBox()
+        self.collation_combo.addItems(["utf8mb4_general_ci", "utf8mb4_unicode_ci", "utf8_general_ci"])
+        self.collation_combo.setCurrentText("utf8mb4_general_ci")
+        collation_layout.addWidget(self.collation_combo)
         bottom_layout.addWidget(collation_group)
         
         # 二进制定义
         binary_group = QGroupBox("选项")
         binary_layout = QVBoxLayout(binary_group)
-        binary_checkbox = QCheckBox("二进制定义")
-        binary_layout.addWidget(binary_checkbox)
+        self.binary_checkbox = QCheckBox("二进制定义")
+        binary_layout.addWidget(self.binary_checkbox)
         bottom_layout.addWidget(binary_group)
+        
+        # 连接信号
+        self.field_table.itemSelectionChanged.connect(self.update_encoding_info)
         
         left_layout.addWidget(bottom_widget)
         
@@ -411,33 +408,37 @@ class TableDesigner(QDialog):
                 if self.table_name:
                     # 恢复数据
                     try:
-                        columns = []
-                        auto_increment_column = None
+                        # 获取新表的结构
+                        new_columns = []
                         with self.main_window.db_connection.cursor() as cursor2:
-                            # 获取备份表的结构
-                            cursor2.execute(f"DESCRIBE {backup_table}")
-                            backup_columns = cursor2.fetchall()
-                            for col in backup_columns:
+                            # 获取新表的结构
+                            cursor2.execute(f"DESCRIBE {self.table_name}")
+                            new_table_columns = cursor2.fetchall()
+                            for col in new_table_columns:
                                 col_name = col['Field'] if isinstance(col, dict) else col[0]
-                                extra = col['Extra'] if isinstance(col, dict) else col[5]
-                                # 检查是否是自增列
-                                if 'auto_increment' in extra.lower():
-                                    auto_increment_column = col_name
-                                else:
-                                    columns.append(col_name)
+                                new_columns.append(col_name)
                         
-                        if columns:
-                            columns_str = ", ".join(columns)
-                            # 如果有自增列，不包括它在插入语句中
-                            if auto_increment_column:
-                                restore_sql = f"INSERT INTO {self.table_name} ({columns_str}) SELECT {columns_str} FROM {backup_table}"
-                            else:
-                                # 如果没有自增列，使用REPLACE INTO避免主键冲突
-                                restore_sql = f"REPLACE INTO {self.table_name} ({columns_str}) SELECT {columns_str} FROM {backup_table}"
+                        # 获取备份表的结构
+                        backup_columns = []
+                        with self.main_window.db_connection.cursor() as cursor2:
+                            cursor2.execute(f"DESCRIBE {backup_table}")
+                            backup_table_columns = cursor2.fetchall()
+                            for col in backup_table_columns:
+                                col_name = col['Field'] if isinstance(col, dict) else col[0]
+                                backup_columns.append(col_name)
+                        
+                        # 找出两个表共有的列
+                        common_columns = [col for col in backup_columns if col in new_columns]
+                        
+                        if common_columns:
+                            columns_str = ", ".join(common_columns)
+                            # 恢复数据
+                            restore_sql = f"INSERT INTO {self.table_name} ({columns_str}) SELECT {columns_str} FROM {backup_table}"
                             cursor.execute(restore_sql)
-                            # 删除备份表
-                            drop_backup_sql = f"DROP TABLE IF EXISTS {backup_table}"
-                            cursor.execute(drop_backup_sql)
+                        
+                        # 删除备份表
+                        drop_backup_sql = f"DROP TABLE IF EXISTS {backup_table}"
+                        cursor.execute(drop_backup_sql)
                     except Exception as e:
                         self.logger.log('WARNING', f"恢复数据失败: {str(e)}")
             
@@ -610,19 +611,106 @@ class TableDesigner(QDialog):
         """
         显示索引管理对话框
         """
-        QMessageBox.information(self, "索引管理", "索引管理功能开发中...")
+        # 创建索引管理对话框
+        index_dialog = QDialog(self)
+        index_dialog.setWindowTitle("索引管理")
+        index_dialog.setGeometry(200, 200, 600, 400)
+        
+        layout = QVBoxLayout(index_dialog)
+        
+        # 索引表格
+        index_table = QTableWidget()
+        index_table.setColumnCount(4)
+        index_table.setHorizontalHeaderLabels(["索引名", "类型", "字段", "操作"])
+        layout.addWidget(index_table)
+        
+        # 按钮
+        button_layout = QHBoxLayout()
+        add_btn = QPushButton("添加索引")
+        delete_btn = QPushButton("删除索引")
+        button_layout.addWidget(add_btn)
+        button_layout.addWidget(delete_btn)
+        layout.addLayout(button_layout)
+        
+        # 关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(index_dialog.accept)
+        layout.addWidget(close_btn)
+        
+        index_dialog.exec()
     
     def show_foreign_key_dialog(self):
         """
         显示外键管理对话框
         """
-        QMessageBox.information(self, "外键管理", "外键管理功能开发中...")
+        # 创建外键管理对话框
+        fk_dialog = QDialog(self)
+        fk_dialog.setWindowTitle("外键管理")
+        fk_dialog.setGeometry(200, 200, 600, 400)
+        
+        layout = QVBoxLayout(fk_dialog)
+        
+        # 外键表格
+        fk_table = QTableWidget()
+        fk_table.setColumnCount(5)
+        fk_table.setHorizontalHeaderLabels(["外键名", "字段", "引用表", "引用字段", "操作"])
+        layout.addWidget(fk_table)
+        
+        # 按钮
+        button_layout = QHBoxLayout()
+        add_btn = QPushButton("添加外键")
+        delete_btn = QPushButton("删除外键")
+        button_layout.addWidget(add_btn)
+        button_layout.addWidget(delete_btn)
+        layout.addLayout(button_layout)
+        
+        # 关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(fk_dialog.accept)
+        layout.addWidget(close_btn)
+        
+        fk_dialog.exec()
     
     def show_options_dialog(self):
         """
         显示表选项对话框
         """
-        QMessageBox.information(self, "表选项", "表选项功能开发中...")
+        # 创建表选项对话框
+        options_dialog = QDialog(self)
+        options_dialog.setWindowTitle("表选项")
+        options_dialog.setGeometry(200, 200, 400, 300)
+        
+        layout = QVBoxLayout(options_dialog)
+        
+        # 存储引擎
+        engine_group = QGroupBox("存储引擎")
+        engine_layout = QVBoxLayout(engine_group)
+        engine_combo = QComboBox()
+        engine_combo.addItems(["InnoDB", "MyISAM", "MEMORY", "CSV"])
+        engine_combo.setCurrentText("InnoDB")
+        engine_layout.addWidget(engine_combo)
+        layout.addWidget(engine_group)
+        
+        # 表注释
+        comment_group = QGroupBox("表注释")
+        comment_layout = QVBoxLayout(comment_group)
+        comment_edit = QTextEdit()
+        comment_edit.setPlaceholderText("输入表注释")
+        comment_layout.addWidget(comment_edit)
+        layout.addWidget(comment_group)
+        
+        # 按钮
+        button_layout = QHBoxLayout()
+        ok_btn = QPushButton("确定")
+        cancel_btn = QPushButton("取消")
+        button_layout.addWidget(ok_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+        
+        ok_btn.clicked.connect(options_dialog.accept)
+        cancel_btn.clicked.connect(options_dialog.reject)
+        
+        options_dialog.exec()
     
     def _get_calendar_info(self):
         """
@@ -642,5 +730,33 @@ class TableDesigner(QDialog):
 星座: 水瓶座
 节日: 小年
 """
+    
+    def update_encoding_info(self):
+        """
+        根据选中的字段更新编码信息
+        """
+        selected_rows = self.field_table.selectionModel().selectedRows()
+        if selected_rows:
+            row = selected_rows[0].row()
+            # 获取字段类型
+            type_combo = self.field_table.cellWidget(row, 1)
+            if type_combo:
+                field_type = type_combo.currentText()
+                # 根据字段类型更新编码信息
+                if field_type in ['VARCHAR', 'CHAR', 'TEXT', 'TINYTEXT', 'MEDIUMTEXT', 'LONGTEXT']:
+                    # 字符串类型字段可以设置字符集和排序规则
+                    self.charset_combo.setEnabled(True)
+                    self.collation_combo.setEnabled(True)
+                    self.binary_checkbox.setEnabled(True)
+                else:
+                    # 非字符串类型字段不需要设置编码信息
+                    self.charset_combo.setEnabled(False)
+                    self.collation_combo.setEnabled(False)
+                    self.binary_checkbox.setEnabled(False)
+        else:
+            # 没有选中字段时，禁用编码信息设置
+            self.charset_combo.setEnabled(False)
+            self.collation_combo.setEnabled(False)
+            self.binary_checkbox.setEnabled(False)
 
 

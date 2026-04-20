@@ -3,7 +3,7 @@
 SQL操作模块
 """
 
-from PyQt6.QtWidgets import QMessageBox, QInputDialog, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem
+from PyQt6.QtWidgets import QMessageBox, QInputDialog, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QWidget, QTextEdit, QSplitter
 from PyQt6.QtCore import QThreadPool
 from PyQt6.QtGui import QTextCursor
 from core.database_operations import SQLWorker, DatabaseOperations
@@ -90,6 +90,9 @@ class SQLOperations:
             if message_output:
                 message_output.setPlainText("SQL执行中...")
             
+            # 开始加载动画
+            self.main_window.start_loading("正在执行SQL...")
+            
             # 记录SQL执行开始
             self.logger.info(f"开始执行SQL语句: {sql[:100]}...")
             
@@ -156,26 +159,37 @@ class SQLOperations:
                     if message_output:
                         message_output.setPlainText(f"处理SQL执行结果时出错: {e}")
                     self.main_window.status_info.setText("处理结果失败")
+                finally:
+                    # 停止加载动画
+                    self.main_window.stop_loading()
             
             def on_error(error):
-                # 显示错误信息
-                if message_output:
-                    message_output.setPlainText(f"SQL执行失败 | 错误信息: {error}")
-                
-                # 更新状态栏
-                self.main_window.status_info.setText("SQL执行失败")
-                
-                # 分析错误类型并提供更友好的错误信息
-                error_message = f"执行SQL语句时出错: {error}"
-                if "Lost connection" in str(error):
-                    error_message += "\n\n可能的原因：\n- 数据库服务器连接超时\n- 网络连接不稳定\n- 数据库服务器重启"
-                elif "Access denied" in str(error):
-                    error_message += "\n\n可能的原因：\n- 用户名或密码错误\n- 权限不足"
-                elif "Table doesn't exist" in str(error):
-                    error_message += "\n\n可能的原因：\n- 表名错误\n- 表不存在"
-                
-                QMessageBox.critical(self.main_window, "执行SQL", error_message)
-                self.logger.error(f"执行SQL语句失败: {error}")
+                try:
+                    # 显示错误信息
+                    if message_output:
+                        message_output.setPlainText(f"SQL执行失败 | 错误信息: {error}")
+                    
+                    # 更新状态栏
+                    self.main_window.status_info.setText("SQL执行失败")
+                    
+                    # 分析错误类型并提供更友好的错误信息
+                    error_message = f"执行SQL语句时出错: {error}"
+                    if "Lost connection" in str(error):
+                        error_message += "\n\n可能的原因：\n- 数据库服务器连接超时\n- 网络连接不稳定\n- 数据库服务器重启"
+                    elif "Access denied" in str(error):
+                        error_message += "\n\n可能的原因：\n- 用户名或密码错误\n- 权限不足"
+                    elif "Table doesn't exist" in str(error):
+                        error_message += "\n\n可能的原因：\n- 表名错误\n- 表不存在"
+                    elif "Syntax error" in str(error):
+                        error_message += "\n\n可能的原因：\n- SQL语法错误\n- 语句格式不正确"
+                    elif "Duplicate entry" in str(error):
+                        error_message += "\n\n可能的原因：\n- 违反唯一性约束\n- 主键或唯一索引冲突"
+                    
+                    QMessageBox.critical(self.main_window, "执行SQL", error_message)
+                    self.logger.error(f"执行SQL语句失败: {error}")
+                finally:
+                    # 停止加载动画
+                    self.main_window.stop_loading()
             
             worker.signals.finished.connect(on_finished)
             worker.signals.error.connect(on_error)
@@ -183,6 +197,7 @@ class SQLOperations:
             # 启动工作线程
             QThreadPool.globalInstance().start(worker)
         except Exception as e:
+            self.main_window.stop_loading()
             self.logger.error("执行SQL时出错", exception=e)
             QMessageBox.critical(self.main_window, "执行SQL", f"执行SQL时出错: {str(e)}")
             self.main_window.status_info.setText("执行SQL失败")

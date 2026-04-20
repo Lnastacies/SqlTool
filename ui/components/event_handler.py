@@ -44,18 +44,28 @@ class EventHandler:
                 dialog = ConnectionDialog(self.main_window, conn_data)
                 if dialog.exec():
                     new_conn_data = dialog.result
+                    new_group = new_conn_data.get('group', '无')
+                    
+                    # 从所有组中移除旧连接
+                    for group_name, connections in self.main_window.connection_groups.items():
+                        if conn_name in connections:
+                            connections.remove(conn_name)
+                    
                     # 如果连接名称改变，需要更新字典键
                     if new_conn_data['name'] != conn_name:
                         del self.main_window.saved_connections[conn_name]
-                        # 同时从连接组中移除旧名称
-                        for group_name, connections in self.main_window.connection_groups.items():
-                            if conn_name in connections:
-                                connections.remove(conn_name)
-                                connections.append(new_conn_data['name'])
+                    
+                    # 将连接添加到新的分组
+                    if new_group != '无':
+                        if new_group not in self.main_window.connection_groups:
+                            self.main_window.connection_groups[new_group] = []
+                        if new_conn_data['name'] not in self.main_window.connection_groups[new_group]:
+                            self.main_window.connection_groups[new_group].append(new_conn_data['name'])
+                    
                     self.main_window.saved_connections[new_conn_data['name']] = new_conn_data
                     self.main_window.load_connections_to_tree()
                     self.main_window.save_connections()
-                    self.logger.log('INFO', f"编辑连接: {new_conn_data['name']}")
+                    self.logger.log('INFO', f"编辑连接: {new_conn_data['name']}, 分组: {new_group}")
     
     def delete_connection(self):
         """删除连接"""
@@ -303,7 +313,7 @@ class EventHandler:
                 self.main_window.db_connection = self.main_window.connection_pool.get_connection(conn_name, conn_data)
 
                 if not self.main_window.db_connection:
-                    QMessageBox.warning(self.main_window, "连接失败", f"未支持的数据库类型或驱动未安装: {conn_data['type']}")
+                    QMessageBox.warning(self.main_window, "连接失败", f"连接数据库失败: 可能是数据库服务未启动或连接信息错误")
                     return
 
                 # 连接成功
@@ -350,607 +360,7 @@ class EventHandler:
         self.main_window.right_panel.tabs.removeTab(index)
         self.logger.log('INFO', f"关闭标签页: {tab_text}")
     
-    def toggle_dark_mode(self):
-        """切换深色模式"""
-        # 切换深色模式
-        is_dark = hasattr(self.main_window, 'dark_mode') and self.main_window.dark_mode
 
-        if is_dark:
-            # 切换到浅色模式
-            self._set_light_mode()
-        else:
-            # 切换到深色模式
-            self._set_dark_mode()
-
-        self.logger.log('INFO', f"切换到{'深色' if not is_dark else '浅色'}模式")
-    
-    def _set_light_mode(self):
-        """设置浅色模式"""
-        # 重置主窗口样式
-        self.main_window.setStyleSheet('')
-        self.main_window.dark_mode = False
-        
-        # 重置左侧面板样式
-        if hasattr(self.main_window, 'left_panel'):
-            self.main_window.left_panel.setStyleSheet("QWidget { background-color: #f5f5f5; border-right: 1px solid #d0d0d0; }")
-            
-            # 重置标签页样式
-            self.main_window.left_panel.tab_widget.setStyleSheet("""
-                QTabWidget::pane {
-                    border: 1px solid #d0d0d0;
-                    background-color: #ffffff;
-                }
-                QTabBar::tab {
-                    padding: 8px 16px;
-                    font-size: 11px;
-                    font-family: 'Microsoft YaHei', Arial;
-                    background-color: #f0f0f0;
-                    border: 1px solid #d0d0d0;
-                    border-bottom: none;
-                    margin-right: 2px;
-                    border-top-left-radius: 4px;
-                    border-top-right-radius: 4px;
-                }
-                QTabBar::tab:selected {
-                    background-color: #ffffff;
-                    border-bottom: 1px solid #ffffff;
-                    font-weight: bold;
-                }
-                QTabBar::tab:hover {
-                    background-color: #e8e8e8;
-                }
-            """)
-            
-            # 重置树控件样式
-            self.main_window.left_panel.connection_tree.setStyleSheet("""
-                QTreeWidget {
-                    background-color: #ffffff;
-                    border: none;
-                    font-family: 'Microsoft YaHei', Arial;
-                    font-size: 11px;
-                }
-                QTreeWidget::item {
-                    padding: 3px 0;
-                    height: 22px;
-                }
-                QTreeWidget::item:hover {
-                    background-color: #f0f0f0;
-                }
-                QTreeWidget::item:selected {
-                    background-color: #e3f2fd;
-                    color: #1976d2;
-                }
-            """)
-            
-            self.main_window.left_panel.object_tree.setStyleSheet("""
-                QTreeWidget {
-                    background-color: #ffffff;
-                    border: none;
-                    font-family: 'Microsoft YaHei', Arial;
-                    font-size: 11px;
-                }
-                QTreeWidget::item {
-                    padding: 3px 0;
-                    height: 22px;
-                }
-                QTreeWidget::item:hover {
-                    background-color: #f0f0f0;
-                }
-                QTreeWidget::item:selected {
-                    background-color: #e3f2fd;
-                    color: #1976d2;
-                }
-                QTreeWidget::branch:closed:has-children {
-                    image: url(:/icons/closed_folder.png);
-                }
-                QTreeWidget::branch:open:has-children {
-                    image: url(:/icons/open_folder.png);
-                }
-            """)
-        
-        # 重置右侧面板样式
-        if hasattr(self.main_window, 'right_panel'):
-            self.main_window.right_panel.setStyleSheet("QWidget { background-color: #f5f5f5; }")
-            
-            # 重置标签页样式
-            self.main_window.right_panel.tabs.setStyleSheet("""
-                QTabWidget {
-                    background-color: #f5f5f5;
-                }
-                QTabWidget::pane {
-                    background-color: #ffffff;
-                    border: 1px solid #d0d0d0;
-                }
-                QTabBar::tab {
-                    padding: 8px 16px;
-                    font-size: 11px;
-                    font-family: 'Microsoft YaHei', Arial;
-                    background-color: #f0f0f0;
-                    border: 1px solid #d0d0d0;
-                    border-bottom: none;
-                    margin-right: 2px;
-                    border-top-left-radius: 4px;
-                    border-top-right-radius: 4px;
-                }
-                QTabBar::tab:selected {
-                    background-color: #ffffff;
-                    border-bottom: 1px solid #ffffff;
-                    font-weight: bold;
-                }
-                QTabBar::tab:hover {
-                    background-color: #e8e8e8;
-                }
-                QTabBar::close-button {
-                    image: url(:/icons/close.png);
-                    subcontrol-position: right;
-                    subcontrol-origin: padding;
-                    width: 16px;
-                    height: 16px;
-                    margin-left: 8px;
-                }
-                QTabBar::close-button:hover {
-                    image: url(:/icons/close_hover.png);
-                }
-            """)
-        
-        # 重置查询标签页样式
-        for i in range(self.main_window.right_panel.tabs.count()):
-            tab_widget = self.main_window.right_panel.tabs.widget(i)
-            if hasattr(tab_widget, 'sql_editor'):
-                # 重置SQL编辑器样式
-                tab_widget.sql_editor.setStyleSheet("""
-                    QTextEdit {
-                        background-color: #ffffff;
-                        border: 1px solid #d0d0d0;
-                        font-family: 'Consolas', 'Courier New', monospace;
-                        font-size: 11px;
-                        padding: 0 8px 0 0;
-                        line-height: 1.4;
-                    }
-                """)
-                
-                # 重置结果表格样式
-                tab_widget.result_table.setStyleSheet("""
-                    QTableWidget {
-                        background-color: #ffffff;
-                        border: 1px solid #d0d0d0;
-                        font-size: 11px;
-                        font-family: 'Microsoft YaHei', Arial;
-                    }
-                    QTableWidget::header {
-                        background-color: #f0f0f0;
-                        border-bottom: 1px solid #d0d0d0;
-                        padding: 4px;
-                        font-size: 11px;
-                        font-family: 'Microsoft YaHei', Arial;
-                        font-weight: bold;
-                    }
-                    QTableWidget::item {
-                        padding: 4px 8px;
-                        height: 24px;
-                    }
-                    QTableWidget::item:selected {
-                        background-color: #e3f2fd;
-                        color: #1976d2;
-                    }
-                """)
-        
-        # 重置状态栏样式
-        if hasattr(self.main_window, 'status_bar'):
-            self.main_window.status_bar.setStyleSheet("""
-                QStatusBar {
-                    background-color: #f0f0f0;
-                    border-top: 1px solid #d0d0d0;
-                    font-size: 11px;
-                    font-family: 'Microsoft YaHei', Arial;
-                    padding: 4px 12px;
-                    min-height: 30px;
-                }
-                QStatusBar QLabel {
-                    margin-right: 20px;
-                    color: #333;
-                    padding: 2px 0;
-                }
-            """)
-        
-        # 重置菜单栏样式
-        menu_bar = self.main_window.menuBar()
-        menu_bar.setStyleSheet("""
-            QMenuBar {
-                background-color: #f0f0f0;
-                border-bottom: 1px solid #d0d0d0;
-                padding: 4px 0;
-            }
-            QMenuBar::item {
-                padding: 6px 12px;
-                font-size: 11px;
-                font-family: 'Microsoft YaHei', Arial;
-                background-color: transparent;
-            }
-            QMenuBar::item:hover {
-                background-color: #e8e8e8;
-                border-radius: 4px;
-            }
-            QMenuBar::item:selected {
-                background-color: #e3f2fd;
-                color: #1976d2;
-                border-radius: 4px;
-            }
-            QMenu {
-                background-color: #ffffff;
-                border: 1px solid #d0d0d0;
-                border-radius: 4px;
-                font-size: 11px;
-                font-family: 'Microsoft YaHei', Arial;
-            }
-            QMenu::item {
-                padding: 6px 24px;
-            }
-            QMenu::item:hover {
-                background-color: #e3f2fd;
-                color: #1976d2;
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #d0d0d0;
-                margin: 4px 0;
-            }
-        """)
-        
-        # 重置工具栏样式
-        if hasattr(self.main_window, 'main_toolbar'):
-            self.main_window.main_toolbar.setStyleSheet("""
-                QToolBar {
-                    background-color: #f8f8f8;
-                    border: 1px solid #e0e0e0;
-                    padding: 2px;
-                    spacing: 1px;
-                }
-                QToolButton {
-                    padding: 4px 6px;
-                    font-size: 10px;
-                    font-family: 'Microsoft YaHei', Arial;
-                    border: 1px solid transparent;
-                    border-radius: 2px;
-                    background-color: transparent;
-                    margin: 0 1px;
-                }
-                QToolButton:hover {
-                    background-color: #e8e8e8;
-                    border: 1px solid #d0d0d0;
-                }
-                QToolButton:pressed {
-                    background-color: #d0d0d0;
-                    border: 1px solid #b0b0b0;
-                }
-                QToolButton:checked {
-                    background-color: #e3f2fd;
-                    border: 1px solid #1976d2;
-                    color: #1976d2;
-                }
-            """)
-        
-        self.main_window.status_info.setText("已切换到浅色模式")
-    
-    def _set_dark_mode(self):
-        """设置深色模式"""
-        # 设置主窗口样式
-        self.main_window.dark_mode = True
-        
-        # 设置左侧面板样式
-        if hasattr(self.main_window, 'left_panel'):
-            self.main_window.left_panel.setStyleSheet("QWidget { background-color: #252526; border-right: 1px solid #3e3e42; }")
-            
-            # 设置标签页样式
-            self.main_window.left_panel.tab_widget.setStyleSheet("""
-                QTabWidget::pane {
-                    border: 1px solid #3e3e42;
-                    background-color: #1e1e1e;
-                }
-                QTabBar::tab {
-                    padding: 8px 16px;
-                    font-size: 11px;
-                    font-family: 'Microsoft YaHei', Arial;
-                    background-color: #2d2d30;
-                    color: #d4d4d4;
-                    border: 1px solid #3e3e42;
-                    border-bottom: none;
-                    margin-right: 2px;
-                    border-top-left-radius: 4px;
-                    border-top-right-radius: 4px;
-                }
-                QTabBar::tab:selected {
-                    background-color: #1e1e1e;
-                    color: #ffffff;
-                    border-bottom: 1px solid #1e1e1e;
-                    font-weight: bold;
-                }
-                QTabBar::tab:hover {
-                    background-color: #3e3e42;
-                }
-            """)
-            
-            # 设置树控件样式
-            self.main_window.left_panel.connection_tree.setStyleSheet("""
-                QTreeWidget {
-                    background-color: #1e1e1e;
-                    border: none;
-                    font-family: 'Microsoft YaHei', Arial;
-                    font-size: 11px;
-                    color: #d4d4d4;
-                }
-                QTreeWidget::item {
-                    padding: 3px 0;
-                    height: 22px;
-                }
-                QTreeWidget::item:hover {
-                    background-color: #2d2d30;
-                }
-                QTreeWidget::item:selected {
-                    background-color: #094771;
-                    color: #ffffff;
-                }
-            """)
-            
-            self.main_window.left_panel.object_tree.setStyleSheet("""
-                QTreeWidget {
-                    background-color: #1e1e1e;
-                    border: none;
-                    font-family: 'Microsoft YaHei', Arial;
-                    font-size: 11px;
-                    color: #d4d4d4;
-                }
-                QTreeWidget::item {
-                    padding: 3px 0;
-                    height: 22px;
-                }
-                QTreeWidget::item:hover {
-                    background-color: #2d2d30;
-                }
-                QTreeWidget::item:selected {
-                    background-color: #094771;
-                    color: #ffffff;
-                }
-            """)
-        
-        # 设置右侧面板样式
-        if hasattr(self.main_window, 'right_panel'):
-            self.main_window.right_panel.setStyleSheet("QWidget { background-color: #252526; }")
-            
-            # 设置标签页样式
-            self.main_window.right_panel.tabs.setStyleSheet("""
-                QTabWidget {
-                    background-color: #252526;
-                }
-                QTabWidget::pane {
-                    background-color: #1e1e1e;
-                    border: 1px solid #3e3e42;
-                }
-                QTabBar::tab {
-                    padding: 8px 16px;
-                    font-size: 11px;
-                    font-family: 'Microsoft YaHei', Arial;
-                    background-color: #2d2d30;
-                    color: #d4d4d4;
-                    border: 1px solid #3e3e42;
-                    border-bottom: none;
-                    margin-right: 2px;
-                    border-top-left-radius: 4px;
-                    border-top-right-radius: 4px;
-                }
-                QTabBar::tab:selected {
-                    background-color: #1e1e1e;
-                    color: #ffffff;
-                    border-bottom: 1px solid #1e1e1e;
-                    font-weight: bold;
-                }
-                QTabBar::tab:hover {
-                    background-color: #3e3e42;
-                }
-                QTabBar::close-button {
-                    image: url(:/icons/close.png);
-                    subcontrol-position: right;
-                    subcontrol-origin: padding;
-                    width: 16px;
-                    height: 16px;
-                    margin-left: 8px;
-                }
-                QTabBar::close-button:hover {
-                    image: url(:/icons/close_hover.png);
-                }
-            """)
-        
-        # 设置查询标签页样式
-        for i in range(self.main_window.right_panel.tabs.count()):
-            tab_widget = self.main_window.right_panel.tabs.widget(i)
-            if hasattr(tab_widget, 'sql_editor'):
-                # 设置SQL编辑器样式
-                tab_widget.sql_editor.setStyleSheet("""
-                    QTextEdit {
-                        background-color: #1e1e1e;
-                        border: 1px solid #3e3e42;
-                        font-family: 'Consolas', 'Courier New', monospace;
-                        font-size: 11px;
-                        color: #d4d4d4;
-                        padding: 0 8px 0 35px;
-                        line-height: 1.4;
-                    }
-                """)
-                
-                # 设置结果表格样式
-                tab_widget.result_table.setStyleSheet("""
-                    QTableWidget {
-                        background-color: #1e1e1e;
-                        border: 1px solid #3e3e42;
-                        font-size: 11px;
-                        font-family: 'Microsoft YaHei', Arial;
-                        color: #d4d4d4;
-                    }
-                    QTableWidget::header {
-                        background-color: #2d2d30;
-                        border-bottom: 1px solid #3e3e42;
-                        padding: 4px;
-                        font-size: 11px;
-                        font-family: 'Microsoft YaHei', Arial;
-                        font-weight: bold;
-                        color: #d4d4d4;
-                    }
-                    QTableWidget::item {
-                        padding: 4px 8px;
-                        height: 24px;
-                    }
-                    QTableWidget::item:selected {
-                        background-color: #094771;
-                        color: #ffffff;
-                    }
-                """)
-                
-                # 设置顶部工具栏样式
-                for widget in tab_widget.children():
-                    if hasattr(widget, 'setStyleSheet'):
-                        widget.setStyleSheet("""
-                            QWidget {
-                                background-color: #2d2d30;
-                                border-bottom: 1px solid #3e3e42;
-                                padding: 4px 8px;
-                            }
-                            QPushButton {
-                                padding: 4px 8px;
-                                font-size: 11px;
-                                font-family: 'Microsoft YaHei', Arial;
-                                background-color: #1e1e1e;
-                                color: #d4d4d4;
-                                border: 1px solid #3e3e42;
-                                border-radius: 4px;
-                            }
-                            QPushButton:hover {
-                                background-color: #2d2d30;
-                                border: 1px solid #4e4e52;
-                            }
-                            QPushButton:pressed {
-                                background-color: #3e3e42;
-                                border: 1px solid #5e5e62;
-                            }
-                            QComboBox {
-                                padding: 4px 8px;
-                                font-size: 11px;
-                                font-family: 'Microsoft YaHei', Arial;
-                                background-color: #1e1e1e;
-                                color: #d4d4d4;
-                                border: 1px solid #3e3e42;
-                                border-radius: 4px;
-                            }
-                            QComboBox QAbstractItemView {
-                                font-size: 11px;
-                                font-family: 'Microsoft YaHei', Arial;
-                                background-color: #1e1e1e;
-                                color: #d4d4d4;
-                                border: 1px solid #3e3e42;
-                            }
-                        """)
-        
-        # 设置状态栏样式
-        if hasattr(self.main_window, 'status_bar'):
-            self.main_window.status_bar.setStyleSheet("""
-                QStatusBar {
-                    background-color: #252526;
-                    border-top: 1px solid #3e3e42;
-                    font-size: 11px;
-                    font-family: 'Microsoft YaHei', Arial;
-                    padding: 4px 12px;
-                    min-height: 30px;
-                    color: #d4d4d4;
-                }
-                QStatusBar QLabel {
-                    margin-right: 20px;
-                    color: #d4d4d4;
-                    padding: 2px 0;
-                }
-            """)
-        
-        # 设置菜单栏样式
-        menu_bar = self.main_window.menuBar()
-        menu_bar.setStyleSheet("""
-            QMenuBar {
-                background-color: #252526;
-                border-bottom: 1px solid #3e3e42;
-                padding: 4px 0;
-                color: #d4d4d4;
-            }
-            QMenuBar::item {
-                padding: 6px 12px;
-                font-size: 11px;
-                font-family: 'Microsoft YaHei', Arial;
-                background-color: transparent;
-                color: #d4d4d4;
-            }
-            QMenuBar::item:hover {
-                background-color: #3e3e42;
-                border-radius: 4px;
-            }
-            QMenuBar::item:selected {
-                background-color: #094771;
-                color: #ffffff;
-                border-radius: 4px;
-            }
-            QMenu {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
-                border-radius: 4px;
-                font-size: 11px;
-                font-family: 'Microsoft YaHei', Arial;
-                color: #d4d4d4;
-            }
-            QMenu::item {
-                padding: 6px 24px;
-                color: #d4d4d4;
-            }
-            QMenu::item:hover {
-                background-color: #094771;
-                color: #ffffff;
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #3e3e42;
-                margin: 4px 0;
-            }
-        """)
-        
-        # 设置工具栏样式
-        if hasattr(self.main_window, 'main_toolbar'):
-            self.main_window.main_toolbar.setStyleSheet("""
-                QToolBar {
-                    background-color: #252526;
-                    border: 1px solid #3e3e42;
-                    padding: 2px;
-                    spacing: 1px;
-                }
-                QToolButton {
-                    padding: 4px 6px;
-                    font-size: 10px;
-                    font-family: 'Microsoft YaHei', Arial;
-                    border: 1px solid transparent;
-                    border-radius: 2px;
-                    background-color: #1e1e1e;
-                    color: #d4d4d4;
-                    margin: 0 1px;
-                }
-                QToolButton:hover {
-                    background-color: #2d2d30;
-                    border: 1px solid #3e3e42;
-                }
-                QToolButton:pressed {
-                    background-color: #3e3e42;
-                    border: 1px solid #4e4e52;
-                }
-                QToolButton:checked {
-                    background-color: #094771;
-                    border: 1px solid #1976d2;
-                    color: #ffffff;
-                }
-            """)
-        
-        self.main_window.status_info.setText("已切换到深色模式")
     
     def show_help(self):
         """显示帮助"""
@@ -1111,11 +521,15 @@ class EventHandler:
     
     def generate_er_diagram(self):
         """生成ER图表"""
-        self.show_feature_not_implemented("ER图表")
+        from ui.components.er_diagram import ERDiagram
+        diagram = ERDiagram(self.main_window)
+        diagram.exec()
     
     def transfer_data(self):
         """数据传输"""
-        self.show_feature_not_implemented("数据传输")
+        from ui.components.data_transfer import DataTransfer
+        transfer = DataTransfer(self.main_window)
+        transfer.exec()
     
     def scheduled_tasks(self):
         """计划任务"""
@@ -1131,19 +545,31 @@ class EventHandler:
     
     def backup_database(self):
         """备份数据库"""
-        self.show_feature_not_implemented("备份数据库")
+        from ui.components.backup_restore import BackupRestore
+        backup_restore = BackupRestore(self.main_window)
+        backup_restore.tab_widget.setCurrentIndex(0)  # 切换到备份标签页
+        backup_restore.exec()
     
     def restore_database(self):
         """还原数据库"""
-        self.show_feature_not_implemented("还原数据库")
+        from ui.components.backup_restore import BackupRestore
+        backup_restore = BackupRestore(self.main_window)
+        backup_restore.tab_widget.setCurrentIndex(1)  # 切换到恢复标签页
+        backup_restore.exec()
     
     def sync_data(self):
         """数据同步"""
-        self.show_feature_not_implemented("数据同步")
+        from ui.components.database_sync import DatabaseSync
+        sync = DatabaseSync(self.main_window)
+        sync.tab_widget.setCurrentIndex(1)  # 切换到数据同步标签页
+        sync.exec()
     
     def sync_structure(self):
         """结构同步"""
-        self.show_feature_not_implemented("结构同步")
+        from ui.components.database_sync import DatabaseSync
+        sync = DatabaseSync(self.main_window)
+        sync.tab_widget.setCurrentIndex(0)  # 切换到结构同步标签页
+        sync.exec()
     
     def toggle_object_browser(self):
         """显示/隐藏对象浏览器"""
@@ -1188,3 +614,120 @@ class EventHandler:
     def show_table_info(self, table_name):
         """显示表信息"""
         self.main_window.table_operations.show_table_info(table_name)
+    
+    def on_object_context_menu(self, pos):
+        """对象上下文菜单"""
+        from PyQt6.QtWidgets import QMenu
+        
+        # 获取当前选中的项
+        item = self.main_window.left_panel.object_tree.itemAt(pos)
+        if not item:
+            return
+
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+
+        item_type, item_name = data
+        menu = QMenu()
+
+        # 表对象的右键菜单
+        if item_type == 'table':
+            # 基本操作
+            menu.addAction("打开表", lambda: self.open_table(item_name))
+            menu.addAction("设计表", lambda: self.main_window.table_operations.design_table(item_name))
+            menu.addAction("新建表", self.new_table)
+            menu.addSeparator()
+            menu.addAction("删除表", lambda: self.delete_table(item_name))
+            menu.addAction("清空表", lambda: self.truncate_table(item_name, False))
+            menu.addAction("截断表", lambda: self.truncate_table(item_name, True))
+            menu.addSeparator()
+
+            # 复制操作
+            copy_menu = menu.addMenu("复制表")
+            copy_menu.addAction("结构和数据", lambda: self.copy_table(item_name, True, True))
+            copy_menu.addAction("仅结构", lambda: self.copy_table(item_name, True, False))
+            copy_menu.addAction("仅数据", lambda: self.copy_table(item_name, False, True))
+            menu.addSeparator()
+
+            # 导出操作
+            export_menu = menu.addMenu("导出")
+            export_menu.addAction("SQL文件", lambda: self.dump_sql(item_name, True, True))
+            export_menu.addAction("仅结构", lambda: self.dump_sql(item_name, True, False))
+            export_menu.addAction("仅数据", lambda: self.dump_sql(item_name, False, True))
+            menu.addSeparator()
+
+            # 维护操作
+            maintenance_menu = menu.addMenu("维护")
+            maintenance_menu.addAction("分析表", lambda: self.maintain_table(item_name, "ANALYZE"))
+            maintenance_menu.addAction("检查表", lambda: self.maintain_table(item_name, "CHECK"))
+            maintenance_menu.addAction("优化表", lambda: self.maintain_table(item_name, "OPTIMIZE"))
+            maintenance_menu.addAction("修复表", lambda: self.maintain_table(item_name, "REPAIR"))
+
+            menu.addSeparator()
+            menu.addAction("逆向表到模型...", lambda: self.show_feature_not_implemented("逆向表到模型"))
+            menu.addSeparator()
+
+            # 管理组
+            group_menu = menu.addMenu("管理组")
+            group_menu.addAction("添加到组", lambda: self.show_feature_not_implemented("添加到组"))
+            group_menu.addAction("从组移除", lambda: self.show_feature_not_implemented("从组移除"))
+
+            menu.addSeparator()
+            menu.addAction("复制", lambda: self.show_feature_not_implemented("复制"))
+            menu.addAction("重命名", lambda: self.rename_table(item_name))
+            menu.addAction("创建打开表快捷方式...", lambda: self.show_feature_not_implemented("创建打开表快捷方式"))
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+            menu.addSeparator()
+            menu.addAction("对象信息", lambda: self.show_table_info(item_name))
+        # 视图对象的右键菜单
+        elif item_type == 'view':
+            menu.addAction("打开视图", lambda: self.show_feature_not_implemented("打开视图"))
+            menu.addAction("设计视图", lambda: self.show_feature_not_implemented("设计视图"))
+            menu.addSeparator()
+            menu.addAction("删除视图", lambda: self.show_feature_not_implemented("删除视图"))
+            menu.addSeparator()
+            menu.addAction("重命名", lambda: self.show_feature_not_implemented("重命名视图"))
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+            menu.addSeparator()
+            menu.addAction("对象信息", lambda: self.show_feature_not_implemented("显示视图信息"))
+        # 函数对象的右键菜单
+        elif item_type == 'function':
+            menu.addAction("编辑函数", lambda: self.show_feature_not_implemented("编辑函数"))
+            menu.addSeparator()
+            menu.addAction("删除函数", lambda: self.show_feature_not_implemented("删除函数"))
+            menu.addSeparator()
+            menu.addAction("重命名", lambda: self.show_feature_not_implemented("重命名函数"))
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+        # 存储过程对象的右键菜单
+        elif item_type == 'procedure':
+            menu.addAction("编辑存储过程", lambda: self.show_feature_not_implemented("编辑存储过程"))
+            menu.addSeparator()
+            menu.addAction("删除存储过程", lambda: self.show_feature_not_implemented("删除存储过程"))
+            menu.addSeparator()
+            menu.addAction("重命名", lambda: self.show_feature_not_implemented("重命名存储过程"))
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+        # 事件对象的右键菜单
+        elif item_type == 'event':
+            menu.addAction("编辑事件", lambda: self.show_feature_not_implemented("编辑事件"))
+            menu.addSeparator()
+            menu.addAction("删除事件", lambda: self.show_feature_not_implemented("删除事件"))
+            menu.addSeparator()
+            menu.addAction("重命名", lambda: self.show_feature_not_implemented("重命名事件"))
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+        # 数据库对象的右键菜单
+        elif item_type == 'database':
+            menu.addAction("打开数据库", lambda: self.show_feature_not_implemented("打开数据库"))
+            menu.addAction("新建查询", self.new_query)
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+        # 其他对象类型的右键菜单
+        else:
+            menu.addAction("刷新", self.refresh_objects)
+
+        menu.exec(self.main_window.left_panel.object_tree.mapToGlobal(pos))

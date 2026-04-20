@@ -53,115 +53,12 @@ class TableOperations:
     def new_table(self):
         """新建表"""
         try:
-            # 获取表名
-            table_name, ok = QInputDialog.getText(self.main_window, "新建表", "请输入表名:")
-            if not ok or not table_name:
-                return
+            # 使用表设计器
+            from .table_designer import TableDesigner
+            designer = TableDesigner(self.main_window)
+            designer.exec()
             
-            # 创建表结构对话框
-            dialog = QDialog(self.main_window)
-            dialog.setWindowTitle(f"新建表: {table_name}")
-            dialog.setGeometry(300, 200, 800, 400)
-            
-            layout = QVBoxLayout(dialog)
-            
-            # 创建工具栏
-            toolbar = QToolBar()
-            add_col_action = QAction("添加列", dialog)
-            del_col_action = QAction("删除列", dialog)
-            toolbar.addAction(add_col_action)
-            toolbar.addAction(del_col_action)
-            layout.addWidget(toolbar)
-            
-            # 创建表结构表格
-            table = QTableWidget()
-            table.setColumnCount(6)
-            table.setHorizontalHeaderLabels(["字段名", "数据类型", "长度", "是否为空", "默认值", "主键"])
-            
-            # 添加默认列
-            table.setRowCount(1)
-            table.setItem(0, 0, QTableWidgetItem("id"))
-            table.setItem(0, 1, QTableWidgetItem("INT"))
-            table.setItem(0, 2, QTableWidgetItem("11"))
-            table.setItem(0, 3, QTableWidgetItem("NO"))
-            table.setItem(0, 4, QTableWidgetItem("AUTO_INCREMENT"))
-            table.setItem(0, 5, QTableWidgetItem("PRI"))
-            
-            table.resizeColumnsToContents()
-            layout.addWidget(table)
-            
-            # 按钮
-            button_layout = QHBoxLayout()
-            create_btn = QPushButton("创建")
-            cancel_btn = QPushButton("取消")
-            
-            button_layout.addWidget(create_btn)
-            button_layout.addWidget(cancel_btn)
-            layout.addLayout(button_layout)
-            
-            # 连接信号
-            def add_column():
-                row_count = table.rowCount()
-                table.setRowCount(row_count + 1)
-            
-            def delete_column():
-                selected_rows = table.selectionModel().selectedRows()
-                if selected_rows:
-                    row = selected_rows[0].row()
-                    table.removeRow(row)
-            
-            def create_table():
-                try:
-                    # 生成创建表的SQL语句
-                    sql = f"CREATE TABLE {table_name} ("
-                    columns = []
-                    
-                    for i in range(table.rowCount()):
-                        col_name = table.item(i, 0).text() if table.item(i, 0) else ""
-                        col_type = table.item(i, 1).text() if table.item(i, 1) else ""
-                        col_length = table.item(i, 2).text() if table.item(i, 2) else ""
-                        col_null = table.item(i, 3).text() if table.item(i, 3) else ""
-                        col_default = table.item(i, 4).text() if table.item(i, 4) else ""
-                        col_key = table.item(i, 5).text() if table.item(i, 5) else ""
-                        
-                        if col_name and col_type:
-                            column_def = f"{col_name} {col_type}"
-                            if col_length:
-                                column_def += f"({col_length})"
-                            if col_null == "NO":
-                                column_def += " NOT NULL"
-                            if col_default:
-                                column_def += f" DEFAULT {col_default}"
-                            if col_key == "PRI":
-                                column_def += " PRIMARY KEY"
-                            if "AUTO_INCREMENT" in col_default:
-                                column_def += " AUTO_INCREMENT"
-                            columns.append(column_def)
-                    
-                    if columns:
-                        sql += ", ".join(columns)
-                        sql += ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
-                        
-                        # 执行SQL
-                        with self.main_window.db_connection.cursor() as cursor:
-                            cursor.execute(sql)
-                            self.main_window.db_connection.commit()
-                        
-                        QMessageBox.information(self.main_window, "新建表成功", f"表 {table_name} 创建成功")
-                        self.logger.log('INFO', f"新建表: {table_name}")
-                        # 刷新对象树
-                        self.main_window.load_database_objects()
-                        dialog.accept()
-                except Exception as e:
-                    QMessageBox.critical(self.main_window, "新建表失败", f"创建表 {table_name} 时出错: {str(e)}")
-                    self.logger.log('ERROR', f"新建表失败: {str(e)}")
-            
-            add_col_action.triggered.connect(add_column)
-            del_col_action.triggered.connect(delete_column)
-            create_btn.clicked.connect(create_table)
-            cancel_btn.clicked.connect(dialog.reject)
-            
-            dialog.exec()
+            self.logger.log('INFO', "新建表")
         except Exception as e:
             QMessageBox.critical(self.main_window, "新建表失败", f"新建表时出错: {str(e)}")
             self.logger.log('ERROR', f"新建表失败: {str(e)}")

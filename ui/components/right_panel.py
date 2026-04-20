@@ -31,32 +31,32 @@ class RightPanel(QWidget):
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
         self.tabs.tabCloseRequested.connect(self.main_window.event_handler.close_tab)
+        self.tabs.setMovable(True)  # 支持拖拽排序
         self.tabs.setStyleSheet("""
             QTabWidget {
-                background-color: #f5f5f5;
+                background-color: #F8F9FA;
             }
             QTabWidget::pane {
                 background-color: #ffffff;
-                border: 1px solid #d0d0d0;
+                border: 1px solid #E0E0E0;
             }
             QTabBar::tab {
                 padding: 8px 16px;
-                font-size: 11px;
-                font-family: 'Microsoft YaHei', Arial;
-                background-color: #f0f0f0;
-                border: 1px solid #d0d0d0;
-                border-bottom: none;
+                font-size: 12px;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                background-color: #F8F9FA;
+                border: none;
+                border-bottom: 2px solid transparent;
                 margin-right: 2px;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
+                height: 32px;
             }
             QTabBar::tab:selected {
                 background-color: #ffffff;
-                border-bottom: 1px solid #ffffff;
-                font-weight: bold;
+                border-bottom: 2px solid #007ACC;
+                font-weight: normal;
             }
             QTabBar::tab:hover {
-                background-color: #e8e8e8;
+                background-color: #E3F2FD;
             }
             QTabBar::close-button {
                 image: url(:/icons/close.png);
