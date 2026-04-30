@@ -368,7 +368,9 @@ class EventHandler:
     
     def about(self):
         """关于"""
-        QMessageBox.information(self.main_window, "关于", "Navicat Style SQLTool v1.0\n\n基于PyQt6开发的数据库管理工具")
+        from ui.components.about_dialog import AboutDialog
+        dialog = AboutDialog(self.main_window)
+        dialog.exec()
     
     def copy_sql(self):
         """复制SQL"""
@@ -561,14 +563,12 @@ class EventHandler:
         """数据同步"""
         from ui.components.database_sync import DatabaseSync
         sync = DatabaseSync(self.main_window)
-        sync.tab_widget.setCurrentIndex(1)  # 切换到数据同步标签页
         sync.exec()
     
     def sync_structure(self):
         """结构同步"""
-        from ui.components.database_sync import DatabaseSync
-        sync = DatabaseSync(self.main_window)
-        sync.tab_widget.setCurrentIndex(0)  # 切换到结构同步标签页
+        from ui.components.structure_sync import StructureSync
+        sync = StructureSync(self.main_window)
         sync.exec()
     
     def toggle_object_browser(self):

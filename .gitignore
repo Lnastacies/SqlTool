@@ -9,6 +9,7 @@ __pycache__/
 
 # 配置文件
 connections.json
+encryption.key
 
 # 日志文件
 operation_log.txt
