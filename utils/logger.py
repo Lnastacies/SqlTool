@@ -5,13 +5,16 @@
 
 import os
 import traceback
+import threading
+import time
 from datetime import datetime
 
 class OperationLogger:
     """操作日志记录器"""
-    def __init__(self, log_file='operation_log.txt', max_log_size=10 * 1024 * 1024):
+    def __init__(self, log_file='operation_log.txt', max_log_size=10 * 1024 * 1024, debug_mode=True):
         self.log_file = log_file
         self.enabled = True
+        self.debug_mode = debug_mode
         self.max_log_size = max_log_size  # 最大日志文件大小（10MB）
         # 确保日志目录存在
         log_dir = os.path.dirname(log_file)
@@ -20,6 +23,26 @@ class OperationLogger:
         
         # 检查并轮换日志文件
         self._rotate_log()
+        # 记录程序启动信息
+        self._log_startup_info()
+    
+    def _log_startup_info(self):
+        """记录程序启动信息"""
+        startup_info = [
+            "=" * 80,
+            "程序启动",
+            f"启动时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')}",
+            f"进程ID: {os.getpid()}",
+            f"主线程: {threading.main_thread().name}",
+            "=" * 80
+        ]
+        for line in startup_info:
+            print(line)
+        try:
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write('\n'.join(startup_info) + '\n\n')
+        except Exception as e:
+            print(f"启动日志记录失败: {e}")
     
     def _rotate_log(self):
         """轮换日志文件"""
@@ -35,13 +58,22 @@ class OperationLogger:
                 except Exception as e:
                     print(f"日志轮换失败: {e}")
     
+    def _get_thread_info(self):
+        """获取线程信息"""
+        current_thread = threading.current_thread()
+        return f"Thread-{current_thread.ident}-{current_thread.name}"
+    
     def log(self, operation_type, message, details='', exception=None):
         """记录操作日志"""
         if not self.enabled:
             return
         
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        log_entry = f"[{timestamp}] [{operation_type}] {message}"
+        # 获取高精度时间戳
+        now = datetime.now()
+        timestamp = now.strftime('%Y-%m-%d %H:%M:%S.%f')
+        thread_info = self._get_thread_info()
+        
+        log_entry = f"[{timestamp}] [{operation_type}] [{thread_info}] {message}"
         if details:
             log_entry += f"\n  详情: {details}"
         if exception:
@@ -60,6 +92,21 @@ class OperationLogger:
                 f.write(log_entry + '\n\n')
         except Exception as e:
             print(f"日志记录失败: {e}")
+    
+    def trace_start(self, operation_name):
+        """开始跟踪操作"""
+        if not self.debug_mode:
+            return
+        self.log('TRACE_START', f"开始操作: {operation_name}")
+    
+    def trace_end(self, operation_name, duration=None):
+        """结束跟踪操作"""
+        if not self.debug_mode:
+            return
+        msg = f"结束操作: {operation_name}"
+        if duration is not None:
+            msg += f" (耗时: {duration:.3f}s)"
+        self.log('TRACE_END', msg)
     
     def info(self, message, details=''):
         """记录信息日志"""

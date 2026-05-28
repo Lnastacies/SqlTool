@@ -97,6 +97,10 @@ class EventHandler:
         QMessageBox.information(self.main_window, feature_name, f"{feature_name}功能开发中...")
         self.logger.log('INFO', f"用户尝试使用未实现的功能: {feature_name}")
     
+    def show_settings(self):
+        """显示选项设置"""
+        self.show_feature_not_implemented("选项设置")
+    
     def new_connection_group(self):
         """新建连接组"""
         group_name, ok = QInputDialog.getText(self.main_window, "新建连接组", "请输入连接组名称:")
@@ -227,83 +231,294 @@ class EventHandler:
         QMessageBox.information(self.main_window, "刷新", "刷新功能开发中...")
     
     def on_connection_context_menu(self, pos):
-        """连接上下文菜单"""
+        """连接上下文菜单（合并了对象浏览功能）"""
         from PyQt6.QtWidgets import QMenu
-        menu = QMenu()
-        
-        # 获取当前选中的项
-        selected_items = self.main_window.left_panel.connection_tree.selectedItems()
-        
-        if selected_items:
-            item = selected_items[0]
-            data = item.data(0, Qt.ItemDataRole.UserRole)
-            
-            if data:
-                item_type, item_name = data
-                
-                if item_type == 'connection':
-                    # 连接相关操作
-                    menu.addAction("连接", lambda: self.connect_to_database(item_name))
-                    menu.addAction("编辑连接", self.edit_connection)
-                    menu.addAction("删除连接", self.delete_connection)
-                    menu.addSeparator()
-                    menu.addAction("新建查询", self.new_query)
-                    menu.addSeparator()
-                    menu.addAction("复制连接", self.copy_connection)
-                    menu.addAction("重命名连接", self.rename_connection)
-                    menu.addSeparator()
-                    menu.addAction("刷新", self.refresh_objects)
-                elif item_type == 'group':
-                    # 连接组相关操作
-                    menu.addAction("新建连接", self.new_connection)
-                    menu.addAction("重命名组", self.rename_connection_group)
-                    menu.addAction("删除组", self.delete_connection_group)
-                    menu.addSeparator()
-                    menu.addAction("刷新", self.refresh_objects)
-                else:
-                    # 数据库相关操作
-                    menu.addAction("打开数据库", lambda: self.show_feature_not_implemented("打开数据库"))
-                    menu.addAction("新建查询", self.new_query)
-                    menu.addSeparator()
-                    menu.addAction("刷新", self.refresh_objects)
-        else:
-            # 通用操作
+
+        item = self.main_window.left_panel.connection_tree.itemAt(pos)
+        if not item:
+            menu = QMenu()
             menu.addAction("新建连接", self.new_connection)
             menu.addAction("新建连接组", self.new_connection_group)
             menu.addSeparator()
             menu.addAction("刷新", self.refresh_objects)
-        
+            menu.exec(self.main_window.left_panel.connection_tree.mapToGlobal(pos))
+            return
+
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+
+        item_type, item_name = data
+        menu = QMenu()
+
+        if item_type == 'connection':
+            menu.addAction("连接", lambda: self.connect_to_database(item_name))
+            menu.addAction("关闭连接", lambda: self.close_connection(item_name))
+            menu.addAction("编辑连接", self.edit_connection)
+            menu.addAction("删除连接", self.delete_connection)
+            menu.addSeparator()
+            menu.addAction("新建查询", self.new_query)
+            menu.addSeparator()
+            menu.addAction("复制连接", self.copy_connection)
+            menu.addAction("重命名连接", self.rename_connection)
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+        elif item_type == 'group':
+            menu.addAction("新建连接", self.new_connection)
+            menu.addAction("重命名组", self.rename_connection_group)
+            menu.addAction("删除组", self.delete_connection_group)
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+        elif item_type == 'table':
+            menu.addAction("打开表", lambda: self.open_table(item_name))
+            menu.addAction("设计表", lambda: self.main_window.table_operations.design_table(item_name))
+            menu.addAction("新建表", self.new_table)
+            menu.addSeparator()
+            menu.addAction("删除表", lambda: self.delete_table(item_name))
+            menu.addAction("清空表", lambda: self.truncate_table(item_name, False))
+            menu.addAction("截断表", lambda: self.truncate_table(item_name, True))
+            menu.addSeparator()
+            copy_menu = menu.addMenu("复制表")
+            copy_menu.addAction("结构和数据", lambda: self.copy_table(item_name, True, True))
+            copy_menu.addAction("仅结构", lambda: self.copy_table(item_name, True, False))
+            copy_menu.addAction("仅数据", lambda: self.copy_table(item_name, False, True))
+            menu.addSeparator()
+            export_menu = menu.addMenu("导出")
+            export_menu.addAction("SQL文件", lambda: self.dump_sql(item_name, True, True))
+            export_menu.addAction("仅结构", lambda: self.dump_sql(item_name, True, False))
+            export_menu.addAction("仅数据", lambda: self.dump_sql(item_name, False, True))
+            menu.addSeparator()
+            maintenance_menu = menu.addMenu("维护")
+            maintenance_menu.addAction("分析表", lambda: self.maintain_table(item_name, "ANALYZE"))
+            maintenance_menu.addAction("检查表", lambda: self.maintain_table(item_name, "CHECK"))
+            maintenance_menu.addAction("优化表", lambda: self.maintain_table(item_name, "OPTIMIZE"))
+            maintenance_menu.addAction("修复表", lambda: self.maintain_table(item_name, "REPAIR"))
+            menu.addSeparator()
+            menu.addAction("逆向表到模型...", lambda: self.show_feature_not_implemented("逆向表到模型"))
+            menu.addSeparator()
+            group_menu = menu.addMenu("管理组")
+            group_menu.addAction("添加到组", lambda: self.show_feature_not_implemented("添加到组"))
+            group_menu.addAction("从组移除", lambda: self.show_feature_not_implemented("从组移除"))
+            menu.addSeparator()
+            menu.addAction("复制", lambda: self.show_feature_not_implemented("复制"))
+            menu.addAction("重命名", lambda: self.rename_table(item_name))
+            menu.addAction("创建打开表快捷方式...", lambda: self.show_feature_not_implemented("创建打开表快捷方式"))
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+            menu.addSeparator()
+            menu.addAction("对象信息", lambda: self.show_table_info(item_name))
+        elif item_type == 'view':
+            menu.addAction("打开视图", lambda: self.show_feature_not_implemented("打开视图"))
+            menu.addAction("设计视图", lambda: self.show_feature_not_implemented("设计视图"))
+            menu.addSeparator()
+            menu.addAction("删除视图", lambda: self.show_feature_not_implemented("删除视图"))
+            menu.addSeparator()
+            menu.addAction("重命名", lambda: self.show_feature_not_implemented("重命名视图"))
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+            menu.addSeparator()
+            menu.addAction("对象信息", lambda: self.show_feature_not_implemented("显示视图信息"))
+        elif item_type == 'function':
+            menu.addAction("编辑函数", lambda: self.show_feature_not_implemented("编辑函数"))
+            menu.addSeparator()
+            menu.addAction("删除函数", lambda: self.show_feature_not_implemented("删除函数"))
+            menu.addSeparator()
+            menu.addAction("重命名", lambda: self.show_feature_not_implemented("重命名函数"))
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+        elif item_type == 'procedure':
+            menu.addAction("编辑存储过程", lambda: self.show_feature_not_implemented("编辑存储过程"))
+            menu.addSeparator()
+            menu.addAction("删除存储过程", lambda: self.show_feature_not_implemented("删除存储过程"))
+            menu.addSeparator()
+            menu.addAction("重命名", lambda: self.show_feature_not_implemented("重命名存储过程"))
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+        elif item_type == 'event':
+            menu.addAction("编辑事件", lambda: self.show_feature_not_implemented("编辑事件"))
+            menu.addSeparator()
+            menu.addAction("删除事件", lambda: self.show_feature_not_implemented("删除事件"))
+            menu.addSeparator()
+            menu.addAction("重命名", lambda: self.show_feature_not_implemented("重命名事件"))
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+        elif item_type == 'database':
+            menu.addAction("打开数据库", lambda: self.show_feature_not_implemented("打开数据库"))
+            menu.addAction("新建查询", self.new_query)
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+        elif item_type == 'tables':
+            menu.addAction("新建表", self.new_table)
+            menu.addSeparator()
+            menu.addAction("刷新", self.refresh_objects)
+        else:
+            menu.addAction("刷新", self.refresh_objects)
+
         menu.exec(self.main_window.left_panel.connection_tree.mapToGlobal(pos))
     
     def on_connection_double_clicked(self, item, column):
-        """连接双击事件"""
+        """连接双击事件（合并了对象浏览功能）"""
         data = item.data(0, Qt.ItemDataRole.UserRole)
-        if data and data[0] == 'connection':
-            conn_name = data[1]
+        if not data:
+            return
+
+        item_type, item_name = data
+
+        if item_type == 'connection':
+            conn_name = item_name
             self.connect_to_database(conn_name)
-            # 更新所有标签页的连接和数据库下拉框
+            
+            conn_item = None
+            parent_item = None
+            
+            for i in range(self.main_window.left_panel.connection_tree.topLevelItemCount()):
+                top_item = self.main_window.left_panel.connection_tree.topLevelItem(i)
+                top_item_data = top_item.data(0, Qt.ItemDataRole.UserRole)
+                
+                if top_item_data and len(top_item_data) >= 2:
+                    if top_item_data[0] == 'connection' and top_item_data[1] == conn_name:
+                        conn_item = top_item
+                        parent_item = top_item.parent()
+                        break
+                    elif top_item_data[0] == 'group':
+                        for j in range(top_item.childCount()):
+                            child_item = top_item.child(j)
+                            child_data = child_item.data(0, Qt.ItemDataRole.UserRole)
+                            if child_data and len(child_data) >= 2 and child_data[0] == 'connection' and child_data[1] == conn_name:
+                                conn_item = child_item
+                                parent_item = top_item
+                                break
+                    if conn_item:
+                        break
+            
+            if parent_item:
+                parent_item.setExpanded(True)
+            if conn_item:
+                conn_item.setExpanded(True)
+            
             self.main_window.update_all_tab_combos()
-        elif data and data[0] == 'database':
-            db_name = data[1]
+        elif item_type == 'database':
+            db_name = item_name
             if not db_name:
                 QMessageBox.warning(self.main_window, "切换数据库失败", "数据库名称为空")
                 return
             try:
                 with self.main_window.db_connection.cursor() as cursor:
-                    cursor.execute(f"USE {db_name}")
-                    self.main_window.current_db = db_name
-                    # 重新加载数据库对象
-                    self.main_window.load_database_objects()
-                    # 更新连接状态
-                    self.main_window.connection_status.setText(f"已连接: {self.main_window.current_connection} ({self.main_window.current_db_type}) - 数据库: {db_name}")
-                    self.main_window.status_info.setText("已切换数据库")
-                    self.logger.log('INFO', f"切换到数据库: {db_name}")
-                    # 更新所有标签页的数据库下拉框
-                    self.main_window.update_all_tab_combos()
+                    cursor.execute(f"USE `{db_name}`")
+                
+                self.main_window.current_db = db_name
+                
+                self.main_window.connection_status.setText(f"已连接: {self.main_window.current_connection} ({self.main_window.current_db_type}) - 数据库: {db_name}")
+                self.main_window.status_info.setText("已切换数据库")
+                self.logger.log('INFO', f"切换到数据库: {db_name}")
+                
+                if item.childCount() == 0:
+                    self.main_window.left_panel.load_database_objects(item, db_name)
+                
+                from PyQt6.QtCore import QTimer
+                def check_and_expand():
+                    if item.childCount() > 0:
+                        item.setExpanded(True)
+                QTimer.singleShot(100, check_and_expand)
+                
+                self.main_window.update_all_tab_combos()
+                
+                if self.main_window.current_db and self.main_window.current_db_type in ('MySQL', 'MariaDB'):
+                    try:
+                        with self.main_window.db_connection.cursor() as cursor:
+                            cursor.execute(f"USE `{self.main_window.current_db}`")
+                    except Exception:
+                        pass
             except Exception as e:
                 QMessageBox.critical(self.main_window, "切换数据库失败", f"切换到数据库 {db_name} 时出错: {str(e)}")
                 self.logger.log('ERROR', f"切换数据库失败: {str(e)}")
+        elif item_type == 'table':
+            db_item = item.parent()
+            if db_item:
+                db_item = db_item.parent()
+                if db_item:
+                    db_data = db_item.data(0, Qt.ItemDataRole.UserRole)
+                    if db_data and len(db_data) >= 2 and db_data[0] == 'database':
+                        db_name = db_data[1]
+                        if db_name and db_name != self.main_window.current_db:
+                            try:
+                                with self.main_window.db_connection.cursor() as cursor:
+                                    cursor.execute(f"USE `{db_name}`")
+                                self.main_window.current_db = db_name
+                                self.main_window.update_all_tab_combos()
+                            except Exception as e:
+                                self.logger.log('WARNING', f"切换数据库失败: {e}")
+            self.open_table(item_name)
+        elif item_type == 'view':
+            self.show_feature_not_implemented("打开视图")
+        elif item_type == 'procedure':
+            self.show_feature_not_implemented("打开存储过程")
+        elif item_type == 'function':
+            self.show_feature_not_implemented("打开函数")
+        elif item_type == 'event':
+            self.show_feature_not_implemented("打开事件")
+        else:
+            if item.childCount() > 0:
+                item.setExpanded(not item.isExpanded())
+
+    def on_connection_item_clicked(self, item, column):
+        """连接树单项点击事件（用于显示对象信息）"""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+
+        item_type, item_name = data
+
+        if item_type in ['tables', 'views', 'procedures', 'functions', 'events', 'queries', 'reports', 'backups']:
+            self.main_window.show_object_details(item_type, item_name)
+        elif item_type == 'table':
+            # 确保数据库上下文正确
+            self.main_window.table_operations._ensure_database_context()
+
+            object_info = {
+                'created': '',
+                'updated': '',
+                'fields': [],
+                'indexes': [],
+                'foreign_keys': [],
+                'ddl': ''
+            }
+            try:
+                if hasattr(self.main_window, 'database_operations') and self.main_window.database_operations:
+                    table_info = self.main_window.database_operations.get_table_info(item_name)
+                    object_info.update(table_info)
+                else:
+                    from core.database_operations import DatabaseOperations
+                    self.main_window.database_operations = DatabaseOperations(self.main_window.db_connection, self.main_window.current_db_type)
+                    table_info = self.main_window.database_operations.get_table_info(item_name)
+                    object_info.update(table_info)
+            except Exception as e:
+                self.logger.log('ERROR', f"加载表信息失败: {str(e)}")
+            self.main_window.info_panel.update_info('表', item_name, object_info)
     
+    def close_connection(self, conn_name):
+        """关闭数据库连接"""
+        if self.main_window.current_connection == conn_name:
+            try:
+                if hasattr(self.main_window, 'db_connection') and self.main_window.db_connection:
+                    self.main_window.db_connection.close()
+                    self.main_window.db_connection = None
+                
+                self.main_window.current_connection = ''
+                self.main_window.current_db_type = ''
+                self.main_window.current_db = ''
+                self.main_window.connection_status.setText("未连接")
+                self.main_window.status_info.setText("已断开连接")
+                self.logger.log('INFO', f"关闭连接: {conn_name}")
+                
+                self.main_window.left_panel.load_connections_to_tree(show_only_current=False)
+                self.main_window.update_all_tab_combos()
+            except Exception as e:
+                QMessageBox.critical(self.main_window, "关闭连接失败", f"关闭连接时出错: {str(e)}")
+                self.logger.log('ERROR', f"关闭连接失败: {str(e)}")
+        else:
+            QMessageBox.warning(self.main_window, "关闭连接失败", "只能关闭当前连接")
+
     def connect_to_database(self, conn_name):
         """连接到数据库"""
         conn_data = self.main_window.saved_connections.get(conn_name)
@@ -324,27 +539,18 @@ class EventHandler:
                 self.main_window.status_info.setText("已连接")
                 self.logger.log('INFO', f"连接到数据库: {conn_name}")
 
-                # 加载实际的数据库对象
-                self.main_window.load_database_objects()
-
-                # 初始化数据库操作对象
-                self.main_window.database_operations = DatabaseOperations(self.main_window.db_connection, self.main_window.current_db_type)
-                # 获取表名和列名用于自动补全
-                tables, columns = self.main_window.database_operations.get_database_objects(self.main_window.current_db)
-
-                # 更新所有SQL编辑器的补全列表
-                self.main_window.update_all_sql_editors_completion(tables, columns)
-
-                # 显示所有连接，保持连接列表完整
                 self.main_window.load_connections_to_tree(show_only_current=False)
 
-                # 切换到对象标签页
-                self.main_window.left_panel.tab_widget.setCurrentIndex(1)
+                # 恢复数据库上下文（因为 load_connections_to_tree 会改变当前数据库）
+                if self.main_window.current_db and self.main_window.current_db_type in ('MySQL', 'MariaDB'):
+                    try:
+                        with self.main_window.db_connection.cursor() as cursor:
+                            cursor.execute(f"USE `{self.main_window.current_db}`")
+                    except Exception:
+                        pass
 
-                # 更新查询标签页的连接信息
                 self.main_window.update_query_tab_info()
 
-                # 更新所有标签页的下拉框
                 self.main_window.update_all_tab_combos()
 
                 # 强制刷新界面
@@ -561,9 +767,13 @@ class EventHandler:
     
     def sync_data(self):
         """数据同步"""
+        self.main_window.logger.log('INFO', "===== sync_data 方法被调用 =====")
         from ui.components.database_sync import DatabaseSync
+        self.main_window.logger.log('INFO', "创建 DatabaseSync 对话框")
         sync = DatabaseSync(self.main_window)
+        self.main_window.logger.log('INFO', "DatabaseSync 对话框已创建，准备显示")
         sync.exec()
+        self.main_window.logger.log('INFO', "DatabaseSync 对话框已关闭")
     
     def sync_structure(self):
         """结构同步"""
@@ -615,119 +825,4 @@ class EventHandler:
         """显示表信息"""
         self.main_window.table_operations.show_table_info(table_name)
     
-    def on_object_context_menu(self, pos):
-        """对象上下文菜单"""
-        from PyQt6.QtWidgets import QMenu
-        
-        # 获取当前选中的项
-        item = self.main_window.left_panel.object_tree.itemAt(pos)
-        if not item:
-            return
-
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not data:
-            return
-
-        item_type, item_name = data
-        menu = QMenu()
-
-        # 表对象的右键菜单
-        if item_type == 'table':
-            # 基本操作
-            menu.addAction("打开表", lambda: self.open_table(item_name))
-            menu.addAction("设计表", lambda: self.main_window.table_operations.design_table(item_name))
-            menu.addAction("新建表", self.new_table)
-            menu.addSeparator()
-            menu.addAction("删除表", lambda: self.delete_table(item_name))
-            menu.addAction("清空表", lambda: self.truncate_table(item_name, False))
-            menu.addAction("截断表", lambda: self.truncate_table(item_name, True))
-            menu.addSeparator()
-
-            # 复制操作
-            copy_menu = menu.addMenu("复制表")
-            copy_menu.addAction("结构和数据", lambda: self.copy_table(item_name, True, True))
-            copy_menu.addAction("仅结构", lambda: self.copy_table(item_name, True, False))
-            copy_menu.addAction("仅数据", lambda: self.copy_table(item_name, False, True))
-            menu.addSeparator()
-
-            # 导出操作
-            export_menu = menu.addMenu("导出")
-            export_menu.addAction("SQL文件", lambda: self.dump_sql(item_name, True, True))
-            export_menu.addAction("仅结构", lambda: self.dump_sql(item_name, True, False))
-            export_menu.addAction("仅数据", lambda: self.dump_sql(item_name, False, True))
-            menu.addSeparator()
-
-            # 维护操作
-            maintenance_menu = menu.addMenu("维护")
-            maintenance_menu.addAction("分析表", lambda: self.maintain_table(item_name, "ANALYZE"))
-            maintenance_menu.addAction("检查表", lambda: self.maintain_table(item_name, "CHECK"))
-            maintenance_menu.addAction("优化表", lambda: self.maintain_table(item_name, "OPTIMIZE"))
-            maintenance_menu.addAction("修复表", lambda: self.maintain_table(item_name, "REPAIR"))
-
-            menu.addSeparator()
-            menu.addAction("逆向表到模型...", lambda: self.show_feature_not_implemented("逆向表到模型"))
-            menu.addSeparator()
-
-            # 管理组
-            group_menu = menu.addMenu("管理组")
-            group_menu.addAction("添加到组", lambda: self.show_feature_not_implemented("添加到组"))
-            group_menu.addAction("从组移除", lambda: self.show_feature_not_implemented("从组移除"))
-
-            menu.addSeparator()
-            menu.addAction("复制", lambda: self.show_feature_not_implemented("复制"))
-            menu.addAction("重命名", lambda: self.rename_table(item_name))
-            menu.addAction("创建打开表快捷方式...", lambda: self.show_feature_not_implemented("创建打开表快捷方式"))
-            menu.addSeparator()
-            menu.addAction("刷新", self.refresh_objects)
-            menu.addSeparator()
-            menu.addAction("对象信息", lambda: self.show_table_info(item_name))
-        # 视图对象的右键菜单
-        elif item_type == 'view':
-            menu.addAction("打开视图", lambda: self.show_feature_not_implemented("打开视图"))
-            menu.addAction("设计视图", lambda: self.show_feature_not_implemented("设计视图"))
-            menu.addSeparator()
-            menu.addAction("删除视图", lambda: self.show_feature_not_implemented("删除视图"))
-            menu.addSeparator()
-            menu.addAction("重命名", lambda: self.show_feature_not_implemented("重命名视图"))
-            menu.addSeparator()
-            menu.addAction("刷新", self.refresh_objects)
-            menu.addSeparator()
-            menu.addAction("对象信息", lambda: self.show_feature_not_implemented("显示视图信息"))
-        # 函数对象的右键菜单
-        elif item_type == 'function':
-            menu.addAction("编辑函数", lambda: self.show_feature_not_implemented("编辑函数"))
-            menu.addSeparator()
-            menu.addAction("删除函数", lambda: self.show_feature_not_implemented("删除函数"))
-            menu.addSeparator()
-            menu.addAction("重命名", lambda: self.show_feature_not_implemented("重命名函数"))
-            menu.addSeparator()
-            menu.addAction("刷新", self.refresh_objects)
-        # 存储过程对象的右键菜单
-        elif item_type == 'procedure':
-            menu.addAction("编辑存储过程", lambda: self.show_feature_not_implemented("编辑存储过程"))
-            menu.addSeparator()
-            menu.addAction("删除存储过程", lambda: self.show_feature_not_implemented("删除存储过程"))
-            menu.addSeparator()
-            menu.addAction("重命名", lambda: self.show_feature_not_implemented("重命名存储过程"))
-            menu.addSeparator()
-            menu.addAction("刷新", self.refresh_objects)
-        # 事件对象的右键菜单
-        elif item_type == 'event':
-            menu.addAction("编辑事件", lambda: self.show_feature_not_implemented("编辑事件"))
-            menu.addSeparator()
-            menu.addAction("删除事件", lambda: self.show_feature_not_implemented("删除事件"))
-            menu.addSeparator()
-            menu.addAction("重命名", lambda: self.show_feature_not_implemented("重命名事件"))
-            menu.addSeparator()
-            menu.addAction("刷新", self.refresh_objects)
-        # 数据库对象的右键菜单
-        elif item_type == 'database':
-            menu.addAction("打开数据库", lambda: self.show_feature_not_implemented("打开数据库"))
-            menu.addAction("新建查询", self.new_query)
-            menu.addSeparator()
-            menu.addAction("刷新", self.refresh_objects)
-        # 其他对象类型的右键菜单
-        else:
-            menu.addAction("刷新", self.refresh_objects)
-
-        menu.exec(self.main_window.left_panel.object_tree.mapToGlobal(pos))
+    

@@ -6,6 +6,7 @@
 import json
 import os
 from cryptography.fernet import Fernet
+from core.adapter_factory import AdapterFactory
 
 class ConnectionManager:
     """数据库连接管理器"""
@@ -17,6 +18,7 @@ class ConnectionManager:
         self.key_file = "encryption.key"
         self.key = self._load_or_generate_key()
         self.fernet = Fernet(self.key)
+        self.adapter_factory = AdapterFactory()
     
     def _load_or_generate_key(self):
         """加载或生成加密密钥"""
@@ -121,59 +123,34 @@ class ConnectionManager:
     def test_connection(self, conn_data):
         """测试连接"""
         try:
-            conn = None
             conn_type = conn_data.get('type')
+            adapter = self.adapter_factory.get_adapter(conn_type)
             
-            if conn_type == 'MySQL':
-                import mysql.connector
-                connect_params = {
-                    'host': conn_data.get('host', 'localhost'),
-                    'port': conn_data.get('port', 3306),
-                    'user': conn_data.get('username', 'root'),
-                    'password': conn_data.get('password', ''),
-                    'database': conn_data.get('database', ''),
-                    'connect_timeout': conn_data.get('timeout', 30)
-                }
-                conn = mysql.connector.connect(**connect_params)
+            if not adapter:
+                return False, f"未支持的数据库类型: {conn_type}"
             
+            connection_params = adapter.get_connection_params(conn_data)
+            conn = None
+            
+            if conn_type in ('MySQL', 'MariaDB'):
+                import pymysql
+                conn = pymysql.connect(**connection_params)
             elif conn_type == 'PostgreSQL':
                 import psycopg2
-                connect_params = {
-                    'host': conn_data.get('host', 'localhost'),
-                    'port': conn_data.get('port', 5432),
-                    'user': conn_data.get('username', 'postgres'),
-                    'password': conn_data.get('password', ''),
-                    'dbname': conn_data.get('database', 'postgres'),
-                    'connect_timeout': conn_data.get('timeout', 30)
-                }
-                conn = psycopg2.connect(**connect_params)
-            
+                conn = psycopg2.connect(**connection_params)
             elif conn_type == 'SQLite':
                 import sqlite3
-                conn = sqlite3.connect(conn_data.get('database', ':memory:'))
-            
+                conn = sqlite3.connect(connection_params)
             elif conn_type == 'SQL Server':
                 import pyodbc
-                conn_str = f"DRIVER={{SQL Server}};SERVER={conn_data.get('host', 'localhost')},{conn_data.get('port', 1433)};DATABASE={conn_data.get('database', 'master')};UID={conn_data.get('username', 'sa')};PWD={conn_data.get('password', '')}"
-                conn = pyodbc.connect(conn_str, timeout=conn_data.get('timeout', 30))
-            
-            elif conn_type == 'MariaDB':
-                import mariadb
-                connect_params = {
-                    'host': conn_data.get('host', 'localhost'),
-                    'port': conn_data.get('port', 3306),
-                    'user': conn_data.get('username', 'root'),
-                    'password': conn_data.get('password', ''),
-                    'database': conn_data.get('database', ''),
-                    'connect_timeout': conn_data.get('timeout', 30)
-                }
-                conn = mariadb.connect(**connect_params)
+                conn = pyodbc.connect(connection_params, timeout=conn_data.get('timeout', 30))
             
             if conn:
                 conn.close()
                 return True, "连接成功"
             else:
-                return False, "未支持的数据库类型"
+                return False, "连接创建失败"
         
         except Exception as e:
+            self.logger.log('ERROR', f"测试连接失败: {str(e)}")
             return False, str(e)

@@ -26,11 +26,11 @@ class MenuToolbarManager:
         self.menu_bar_widget = QWidget()
         self.menu_bar_widget.setObjectName("menuBarWidget")
         
-        # 设置菜单栏样式 - 紧贴应用边框，上移到顶部
+        # 设置菜单栏样式 - 紧贴应用边框，上移到顶部，消除底部边框避免与工具栏产生间隙
         self.menu_bar_widget.setStyleSheet("""
             #menuBarWidget {
                 background-color: #F0F0F0;
-                border-bottom: 1px solid #D0D0D0;
+                border-bottom: none;
                 margin: 0;
                 padding: 0;
                 height: 24px;
@@ -115,13 +115,9 @@ class MenuToolbarManager:
             
             menu_layout.addWidget(btn)
         
-        # 添加弹性空间，将登录按钮推到右边
+        # 移除登录按钮，不再需要
+        # 移除弹性空间，使菜单项紧凑排列
         menu_layout.addStretch()
-        
-        # 添加登录按钮
-        login_button = QPushButton("登录")
-        login_button.setStyleSheet(menu_item_style)
-        menu_layout.addWidget(login_button)
         
         # 将菜单栏添加到主布局的最顶部
         self.main_window.main_layout.insertWidget(0, self.menu_bar_widget)
@@ -143,11 +139,12 @@ class MenuToolbarManager:
         self.main_window.main_toolbar.setMovable(False)
         self.main_window.main_toolbar.setFloatable(False)
 
-        # 设置工具栏样式 - 紧凑模式
+        # 设置工具栏样式 - 紧凑模式，消除顶部边框避免与菜单栏产生间隙
         self.main_window.main_toolbar.setStyleSheet("""
             QToolBar {
                 background-color: #F0F0F0;
                 border-bottom: 1px solid #D0D0D0;
+                border-top: none;
                 height: 30px;
                 padding: 1px 4px;
                 spacing: 2px;
@@ -208,21 +205,21 @@ class MenuToolbarManager:
         self.main_window.main_toolbar.addAction(self.main_window.table_action)
 
         # 视图
-        self.main_window.view_action = QAction(create_icon("👁️"), "视图", self.main_window)
+        self.main_window.view_action = QAction(create_icon("👁"), "视图", self.main_window)
         self.main_window.view_action.setToolTip("视图管理")
-        self.main_window.view_action.triggered.connect(lambda: self.main_window.event_handler.show_feature_not_implemented("视图管理"))
+        self.main_window.view_action.triggered.connect(self.main_window.show_view_manager)
         self.main_window.main_toolbar.addAction(self.main_window.view_action)
 
         # 函数
         self.main_window.function_action = QAction(create_icon("fx"), "函数", self.main_window)
-        self.main_window.function_action.setToolTip("函数管理")
-        self.main_window.function_action.triggered.connect(lambda: self.main_window.event_handler.show_feature_not_implemented("函数管理"))
+        self.main_window.function_action.setToolTip("存储过程和函数管理")
+        self.main_window.function_action.triggered.connect(self.main_window.show_routine_manager)
         self.main_window.main_toolbar.addAction(self.main_window.function_action)
 
-        # 事件
+        # 事件（触发器）
         self.main_window.event_action = QAction(create_icon("⏰"), "事件", self.main_window)
-        self.main_window.event_action.setToolTip("事件管理")
-        self.main_window.event_action.triggered.connect(lambda: self.main_window.event_handler.show_feature_not_implemented("事件管理"))
+        self.main_window.event_action.setToolTip("触发器管理")
+        self.main_window.event_action.triggered.connect(self.main_window.show_trigger_manager)
         self.main_window.main_toolbar.addAction(self.main_window.event_action)
 
         # 用户
@@ -249,16 +246,10 @@ class MenuToolbarManager:
         self.main_window.backup_action.triggered.connect(self.main_window.event_handler.backup_database)
         self.main_window.main_toolbar.addAction(self.main_window.backup_action)
 
-        # 自动运行
-        self.main_window.auto_run_action = QAction(create_icon("🔄"), "自动运行", self.main_window)
-        self.main_window.auto_run_action.setToolTip("自动运行")
-        self.main_window.auto_run_action.triggered.connect(lambda: self.main_window.event_handler.show_feature_not_implemented("自动运行"))
-        self.main_window.main_toolbar.addAction(self.main_window.auto_run_action)
-
-        # 模型
+        # 模型（ER图）
         self.main_window.model_action = QAction(create_icon("📋"), "模型", self.main_window)
-        self.main_window.model_action.setToolTip("模型管理")
-        self.main_window.model_action.triggered.connect(lambda: self.main_window.event_handler.show_feature_not_implemented("模型管理"))
+        self.main_window.model_action.setToolTip("ER图生成")
+        self.main_window.model_action.triggered.connect(self.main_window.show_er_diagram)
         self.main_window.main_toolbar.addAction(self.main_window.model_action)
         
         # 将工具栏添加到主布局中（在菜单栏下方）
@@ -327,12 +318,22 @@ class MenuToolbarManager:
         menu.addAction("备份", self.main_window.event_handler.backup_database)
         menu.addAction("还原", self.main_window.event_handler.restore_database)
         menu.addSeparator()
-        menu.addAction("数据传输", self.main_window.event_handler.transfer_data)
+        menu.addAction("数据传输", self.main_window.show_data_transfer)
+        menu.addAction("结构同步", self.main_window.show_structure_sync)
         menu.addSeparator()
-        menu.addAction("结构同步", self.main_window.event_handler.sync_structure)
-        menu.addAction("数据同步", self.main_window.event_handler.sync_data)
+        menu.addAction("视图管理", self.main_window.show_view_manager)
+        menu.addAction("存储过程/函数", self.main_window.show_routine_manager)
+        menu.addAction("触发器管理", self.main_window.show_trigger_manager)
         menu.addSeparator()
-        menu.addAction("选项设置", lambda: self.main_window.event_handler.show_feature_not_implemented("选项设置"))
+        menu.addAction("ER图", self.main_window.show_er_diagram)
+        menu.addAction("计划任务", self.main_window.show_task_scheduler)
+        menu.addSeparator()
+        menu.addAction("实用工具", self.main_window.show_utility_tools)
+        menu.addAction("性能监控", self.main_window.show_performance_monitor)
+        menu.addSeparator()
+        menu.addAction("代码片段", self.main_window.show_snippet_manager)
+        menu.addSeparator()
+        menu.addAction("选项设置", self.main_window.event_handler.show_settings)
     
     def _create_window_menu(self, menu):
         """创建窗口菜单"""

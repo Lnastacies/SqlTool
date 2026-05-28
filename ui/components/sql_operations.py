@@ -16,53 +16,91 @@ class SQLOperations:
         self.main_window = main_window
         self.logger = main_window.logger
     
+    def _add_to_history(self, sql, execution_time=0, row_count=0, success=True, error=""):
+        """添加查询到历史记录"""
+        if hasattr(self.main_window, 'history_manager') and self.main_window.history_manager:
+            self.main_window.history_manager.add_query(
+                sql=sql,
+                connection_name=getattr(self.main_window, 'current_connection', ''),
+                database=getattr(self.main_window, 'current_db', ''),
+                execution_time=execution_time,
+                row_count=row_count,
+                success=success,
+                error_message=error
+            )
+    
+    def _get_sql_editor(self):
+        """
+        获取当前标签页的SQL编辑器
+        
+        返回:
+            SQLTextEdit: SQL编辑器实例，如果找不到则返回None
+        """
+        current_tab = self.main_window.right_panel.tabs.currentWidget()
+        if not current_tab:
+            return None
+        
+        if hasattr(current_tab, 'sql_editor'):
+            sql_editor = current_tab.sql_editor
+            self.logger.log('INFO', "从QueryTab组件中获取SQL编辑器")
+            return sql_editor
+        else:
+            from ui.components.sql_editor import SQLTextEdit
+            for widget in current_tab.findChildren(QWidget):
+                if isinstance(widget, SQLTextEdit):
+                    return widget
+            return None
+    
+    def _get_query_components(self):
+        """
+        获取当前标签页的所有查询组件
+        
+        返回:
+            tuple: (sql_editor, result_table, message_output)
+                   如果某个组件找不到则为None
+        """
+        current_tab = self.main_window.right_panel.tabs.currentWidget()
+        if not current_tab:
+            return None, None, None
+        
+        sql_editor = None
+        result_table = None
+        message_output = None
+        
+        if hasattr(current_tab, 'sql_editor') and hasattr(current_tab, 'result_table') and hasattr(current_tab, 'message_output'):
+            sql_editor = current_tab.sql_editor
+            result_table = current_tab.result_table
+            message_output = current_tab.message_output
+            self.logger.log('INFO', "从QueryTab组件中获取SQL编辑器和结果表格")
+        else:
+            from ui.components.sql_editor import SQLTextEdit
+            for widget in current_tab.findChildren(QWidget):
+                if isinstance(widget, SQLTextEdit):
+                    sql_editor = widget
+                elif isinstance(widget, QTableWidget):
+                    result_table = widget
+                elif isinstance(widget, QTextEdit) and not isinstance(widget, SQLTextEdit):
+                    message_output = widget
+            
+            if not result_table or not message_output:
+                for widget in current_tab.findChildren(QSplitter):
+                    for splitter_widget in widget.findChildren(QWidget):
+                        if isinstance(splitter_widget, QTableWidget):
+                            result_table = splitter_widget
+                        elif isinstance(splitter_widget, QTextEdit) and not isinstance(splitter_widget, SQLTextEdit):
+                            message_output = splitter_widget
+        
+        return sql_editor, result_table, message_output
+    
     def execute_sql(self):
         """
         执行SQL
         """
         try:
-            current_tab = self.main_window.right_panel.tabs.currentWidget()
-            if not current_tab:
-                QMessageBox.warning(self.main_window, "执行SQL", "没有打开的查询标签页")
-                self.logger.warning("尝试执行SQL但没有打开的查询标签页")
-                return
-            
-            # 获取SQL编辑器
-            sql_editor = None
-            result_table = None
-            message_output = None
-            
-            # 检查是否是QueryTab组件
-            if hasattr(current_tab, 'sql_editor') and hasattr(current_tab, 'result_table') and hasattr(current_tab, 'message_output'):
-                # 从QueryTab组件中获取
-                sql_editor = current_tab.sql_editor
-                result_table = current_tab.result_table
-                message_output = current_tab.message_output
-                self.logger.log('INFO', "从QueryTab组件中获取SQL编辑器和结果表格")
-            else:
-                # 对于旧的标签页，保持原有逻辑
-                # 遍历子部件找到SQL编辑器和结果区域
-                for widget in current_tab.findChildren(QWidget):
-                    from ui.components.sql_editor import SQLTextEdit
-                    if isinstance(widget, SQLTextEdit):
-                        sql_editor = widget
-                    elif isinstance(widget, QTableWidget):
-                        result_table = widget
-                    elif isinstance(widget, QTextEdit) and not isinstance(widget, SQLTextEdit):
-                        # 确保只选择普通QTextEdit作为消息输出，排除SQLTextEdit
-                        message_output = widget
-                
-                # 如果没有找到，尝试遍历分割器中的部件
-                if not result_table or not message_output:
-                    for widget in current_tab.findChildren(QSplitter):
-                        for splitter_widget in widget.findChildren(QWidget):
-                            if isinstance(splitter_widget, QTableWidget):
-                                result_table = splitter_widget
-                            elif isinstance(splitter_widget, QTextEdit) and not isinstance(splitter_widget, SQLTextEdit):
-                                message_output = splitter_widget
+            sql_editor, result_table, message_output = self._get_query_components()
             
             if not sql_editor:
-                QMessageBox.warning(self.main_window, "执行SQL", "无法找到SQL编辑器")
+                QMessageBox.warning(self.main_window, "执行SQL", "没有打开的查询标签页或无法找到SQL编辑器")
                 self.logger.warning("尝试执行SQL但无法找到SQL编辑器")
                 return
             
@@ -86,6 +124,15 @@ class SQLOperations:
                 self.logger.warning("尝试执行SQL但未连接到数据库")
                 return
             
+            # 确保数据库上下文正确
+            if hasattr(self.main_window, 'current_db') and self.main_window.current_db and \
+               hasattr(self.main_window, 'current_db_type') and self.main_window.current_db_type in ('MySQL', 'MariaDB'):
+                try:
+                    with self.main_window.db_connection.cursor() as cursor:
+                        cursor.execute(f"USE `{self.main_window.current_db}`")
+                except Exception as e:
+                    self.logger.log('WARNING', f"切换数据库上下文失败: {str(e)}")
+            
             # 显示执行中的提示
             if message_output:
                 message_output.setPlainText("SQL执行中...")
@@ -99,6 +146,9 @@ class SQLOperations:
             # 创建工作线程
             worker = SQLWorker(sql, self.main_window.db_connection, self.main_window.current_db_type, self.main_window)
             
+            # 设置执行标志，防止连接监控干扰
+            self.main_window.sql_executing = True
+            
             # 连接信号
             def on_finished(result):
                 try:
@@ -111,6 +161,10 @@ class SQLOperations:
                     results = result['results']
                     affected_rows = result['affected_rows']
                     execution_time = result['execution_time']
+                    
+                    # 添加到历史记录
+                    result_count = len(results) if results else 0
+                    self._add_to_history(sql, execution_time, result_count or affected_rows, True)
                     
                     if results and result_table:
                         try:
@@ -162,9 +216,14 @@ class SQLOperations:
                 finally:
                     # 停止加载动画
                     self.main_window.stop_loading()
+                    # 清除执行标志
+                    self.main_window.sql_executing = False
             
             def on_error(error):
                 try:
+                    # 添加到历史记录（失败）
+                    self._add_to_history(sql, 0, 0, False, str(error))
+                    
                     # 显示错误信息
                     if message_output:
                         message_output.setPlainText(f"SQL执行失败 | 错误信息: {error}")
@@ -173,23 +232,15 @@ class SQLOperations:
                     self.main_window.status_info.setText("SQL执行失败")
                     
                     # 分析错误类型并提供更友好的错误信息
-                    error_message = f"执行SQL语句时出错: {error}"
-                    if "Lost connection" in str(error):
-                        error_message += "\n\n可能的原因：\n- 数据库服务器连接超时\n- 网络连接不稳定\n- 数据库服务器重启"
-                    elif "Access denied" in str(error):
-                        error_message += "\n\n可能的原因：\n- 用户名或密码错误\n- 权限不足"
-                    elif "Table doesn't exist" in str(error):
-                        error_message += "\n\n可能的原因：\n- 表名错误\n- 表不存在"
-                    elif "Syntax error" in str(error):
-                        error_message += "\n\n可能的原因：\n- SQL语法错误\n- 语句格式不正确"
-                    elif "Duplicate entry" in str(error):
-                        error_message += "\n\n可能的原因：\n- 违反唯一性约束\n- 主键或唯一索引冲突"
+                    error_message = self._get_friendly_error_message(str(error))
                     
                     QMessageBox.critical(self.main_window, "执行SQL", error_message)
                     self.logger.error(f"执行SQL语句失败: {error}")
                 finally:
                     # 停止加载动画
                     self.main_window.stop_loading()
+                    # 清除执行标志
+                    self.main_window.sql_executing = False
             
             worker.signals.finished.connect(on_finished)
             worker.signals.error.connect(on_error)
@@ -198,6 +249,7 @@ class SQLOperations:
             QThreadPool.globalInstance().start(worker)
         except Exception as e:
             self.main_window.stop_loading()
+            self.main_window.sql_executing = False
             self.logger.error("执行SQL时出错", exception=e)
             QMessageBox.critical(self.main_window, "执行SQL", f"执行SQL时出错: {str(e)}")
             self.main_window.status_info.setText("执行SQL失败")
@@ -206,26 +258,7 @@ class SQLOperations:
         """
         SQL格式化
         """
-        current_tab = self.main_window.right_panel.tabs.currentWidget()
-        if not current_tab:
-            return
-        
-        # 获取SQL编辑器
-        sql_editor = None
-        
-        # 检查是否是QueryTab组件
-        if hasattr(current_tab, 'sql_editor'):
-            # 从QueryTab组件中获取
-            sql_editor = current_tab.sql_editor
-            self.logger.log('INFO', "从QueryTab组件中获取SQL编辑器")
-        else:
-            # 对于旧的标签页，保持原有逻辑
-            from ui.components.sql_editor import SQLTextEdit
-            for widget in current_tab.findChildren(QWidget):
-                if isinstance(widget, SQLTextEdit):
-                    sql_editor = widget
-                    break
-        
+        sql_editor = self._get_sql_editor()
         if not sql_editor:
             return
         
@@ -305,26 +338,7 @@ class SQLOperations:
         """
         执行计划
         """
-        current_tab = self.main_window.right_panel.tabs.currentWidget()
-        if not current_tab:
-            return
-        
-        # 获取SQL编辑器
-        sql_editor = None
-        
-        # 检查是否是QueryTab组件
-        if hasattr(current_tab, 'sql_editor'):
-            # 从QueryTab组件中获取
-            sql_editor = current_tab.sql_editor
-            self.logger.log('INFO', "从QueryTab组件中获取SQL编辑器")
-        else:
-            # 对于旧的标签页，保持原有逻辑
-            from ui.components.sql_editor import SQLTextEdit
-            for widget in current_tab.findChildren(QWidget):
-                if isinstance(widget, SQLTextEdit):
-                    sql_editor = widget
-                    break
-        
+        sql_editor = self._get_sql_editor()
         if not sql_editor:
             return
         
@@ -370,26 +384,7 @@ class SQLOperations:
         """
         查找SQL
         """
-        current_tab = self.main_window.right_panel.tabs.currentWidget()
-        if not current_tab:
-            return
-        
-        # 获取SQL编辑器
-        sql_editor = None
-        
-        # 检查是否是QueryTab组件
-        if hasattr(current_tab, 'sql_editor'):
-            # 从QueryTab组件中获取
-            sql_editor = current_tab.sql_editor
-            self.logger.log('INFO', "从QueryTab组件中获取SQL编辑器")
-        else:
-            # 对于旧的标签页，保持原有逻辑
-            from ui.components.sql_editor import SQLTextEdit
-            for widget in current_tab.findChildren(QWidget):
-                if isinstance(widget, SQLTextEdit):
-                    sql_editor = widget
-                    break
-        
+        sql_editor = self._get_sql_editor()
         if not sql_editor:
             return
         
@@ -420,26 +415,7 @@ class SQLOperations:
         """
         替换SQL
         """
-        current_tab = self.main_window.right_panel.tabs.currentWidget()
-        if not current_tab:
-            return
-        
-        # 获取SQL编辑器
-        sql_editor = None
-        
-        # 检查是否是QueryTab组件
-        if hasattr(current_tab, 'sql_editor'):
-            # 从QueryTab组件中获取
-            sql_editor = current_tab.sql_editor
-            self.logger.log('INFO', "从QueryTab组件中获取SQL编辑器")
-        else:
-            # 对于旧的标签页，保持原有逻辑
-            from ui.components.sql_editor import SQLTextEdit
-            for widget in current_tab.findChildren(QWidget):
-                if isinstance(widget, SQLTextEdit):
-                    sql_editor = widget
-                    break
-        
+        sql_editor = self._get_sql_editor()
         if not sql_editor:
             return
         
@@ -516,25 +492,7 @@ class SQLOperations:
         """
         复制SQL
         """
-        current_tab = self.main_window.right_panel.tabs.currentWidget()
-        if not current_tab:
-            return
-        
-        # 获取SQL编辑器
-        sql_editor = None
-        
-        # 检查是否是QueryTab组件
-        if hasattr(current_tab, 'sql_editor'):
-            # 从QueryTab组件中获取
-            sql_editor = current_tab.sql_editor
-        else:
-            # 对于旧的标签页，保持原有逻辑
-            from ui.components.sql_editor import SQLTextEdit
-            for widget in current_tab.findChildren(QWidget):
-                if isinstance(widget, SQLTextEdit):
-                    sql_editor = widget
-                    break
-        
+        sql_editor = self._get_sql_editor()
         if sql_editor:
             sql_editor.copy()
     
@@ -542,25 +500,7 @@ class SQLOperations:
         """
         粘贴SQL
         """
-        current_tab = self.main_window.right_panel.tabs.currentWidget()
-        if not current_tab:
-            return
-        
-        # 获取SQL编辑器
-        sql_editor = None
-        
-        # 检查是否是QueryTab组件
-        if hasattr(current_tab, 'sql_editor'):
-            # 从QueryTab组件中获取
-            sql_editor = current_tab.sql_editor
-        else:
-            # 对于旧的标签页，保持原有逻辑
-            from ui.components.sql_editor import SQLTextEdit
-            for widget in current_tab.findChildren(QWidget):
-                if isinstance(widget, SQLTextEdit):
-                    sql_editor = widget
-                    break
-        
+        sql_editor = self._get_sql_editor()
         if sql_editor:
             sql_editor.paste()
     
@@ -568,25 +508,7 @@ class SQLOperations:
         """
         剪切SQL
         """
-        current_tab = self.main_window.right_panel.tabs.currentWidget()
-        if not current_tab:
-            return
-        
-        # 获取SQL编辑器
-        sql_editor = None
-        
-        # 检查是否是QueryTab组件
-        if hasattr(current_tab, 'sql_editor'):
-            # 从QueryTab组件中获取
-            sql_editor = current_tab.sql_editor
-        else:
-            # 对于旧的标签页，保持原有逻辑
-            from ui.components.sql_editor import SQLTextEdit
-            for widget in current_tab.findChildren(QWidget):
-                if isinstance(widget, SQLTextEdit):
-                    sql_editor = widget
-                    break
-        
+        sql_editor = self._get_sql_editor()
         if sql_editor:
             sql_editor.cut()
     
@@ -594,24 +516,143 @@ class SQLOperations:
         """
         全选SQL
         """
-        current_tab = self.main_window.right_panel.tabs.currentWidget()
-        if not current_tab:
-            return
-        
-        # 获取SQL编辑器
-        sql_editor = None
-        
-        # 检查是否是QueryTab组件
-        if hasattr(current_tab, 'sql_editor'):
-            # 从QueryTab组件中获取
-            sql_editor = current_tab.sql_editor
-        else:
-            # 对于旧的标签页，保持原有逻辑
-            from ui.components.sql_editor import SQLTextEdit
-            for widget in current_tab.findChildren(QWidget):
-                if isinstance(widget, SQLTextEdit):
-                    sql_editor = widget
-                    break
-        
+        sql_editor = self._get_sql_editor()
         if sql_editor:
             sql_editor.selectAll()
+    
+    def _get_friendly_error_message(self, error):
+        """将技术错误转换为友好的错误提示"""
+        error_str = str(error)
+        
+        # 连接相关错误
+        if "Lost connection" in error_str or "connection lost" in error_str.lower():
+            return (
+                "连接丢失\n\n"
+                "可能的原因：\n"
+                "• 数据库服务器连接超时\n"
+                "• 网络连接不稳定或中断\n"
+                "• 数据库服务器已重启\n\n"
+                "建议操作：\n"
+                "1. 检查网络连接\n"
+                "2. 重新连接数据库\n"
+                "3. 联系DBA确认服务器状态"
+            )
+        
+        # 认证相关错误
+        if "Access denied" in error_str or "authentication failed" in error_str.lower():
+            return (
+                "访问被拒绝\n\n"
+                "可能的原因：\n"
+                "• 用户名或密码错误\n"
+                "• 用户权限不足\n"
+                "• 账户已被禁用\n\n"
+                "建议操作：\n"
+                "1. 检查用户名和密码\n"
+                "2. 联系DBA确认账户权限"
+            )
+        
+        # 表不存在错误
+        if "doesn't exist" in error_str or "not found" in error_str.lower():
+            return (
+                "对象不存在\n\n"
+                "可能的原因：\n"
+                "• 表名或视图名拼写错误\n"
+                "• 对象不存在于当前数据库\n"
+                "• 未选择正确的数据库\n\n"
+                "建议操作：\n"
+                "1. 检查对象名称拼写\n"
+                "2. 确认当前数据库是否正确\n"
+                "3. 使用左侧面板查看可用对象"
+            )
+        
+        # 语法错误
+        if "Syntax error" in error_str or "syntax" in error_str.lower():
+            return (
+                "SQL语法错误\n\n"
+                "可能的原因：\n"
+                "• SQL语句格式不正确\n"
+                "• 关键字拼写错误\n"
+                "• 缺少必要的标点符号\n\n"
+                "建议操作：\n"
+                "1. 检查SQL语句语法\n"
+                "2. 使用'格式化SQL'功能整理语句\n"
+                "3. 查阅对应数据库的SQL语法文档"
+            )
+        
+        # 唯一约束冲突
+        if "Duplicate entry" in error_str or "unique constraint" in error_str.lower():
+            return (
+                "数据重复\n\n"
+                "可能的原因：\n"
+                "• 违反唯一性约束\n"
+                "• 主键或唯一索引值已存在\n\n"
+                "建议操作：\n"
+                "1. 检查是否已存在相同的主键值\n"
+                "2. 使用UPDATE代替INSERT\n"
+                "3. 修改插入的数据使其唯一"
+            )
+        
+        # 外键约束错误
+        if "foreign key constraint" in error_str.lower() or "violates foreign key" in error_str.lower():
+            return (
+                "外键约束冲突\n\n"
+                "可能的原因：\n"
+                "• 引用了不存在的记录\n"
+                "• 试图删除被引用的数据\n\n"
+                "建议操作：\n"
+                "1. 先处理子表中的关联数据\n"
+                "2. 使用级联删除或更新\n"
+                "3. 临时禁用外键约束（谨慎使用）"
+            )
+        
+        # 超时错误
+        if "timeout" in error_str.lower() or "timed out" in error_str.lower():
+            return (
+                "操作超时\n\n"
+                "可能的原因：\n"
+                "• 查询数据量过大\n"
+                "• 数据库服务器负载过高\n"
+                "• 网络延迟过高\n\n"
+                "建议操作：\n"
+                "1. 添加适当的WHERE条件限制数据量\n"
+                "2. 使用分页查询\n"
+                "3. 检查是否有全表扫描\n"
+                "4. 考虑创建索引优化查询"
+            )
+        
+        # 锁等待超时
+        if "Lock wait timeout" in error_str or "deadlock" in error_str.lower():
+            return (
+                "锁等待超时或死锁\n\n"
+                "可能的原因：\n"
+                "• 其他事务锁定了所需数据\n"
+                "• 存在死锁情况\n"
+                "• 长时间运行的事务未提交\n\n"
+                "建议操作：\n"
+                "1. 稍后重试操作\n"
+                "2. 检查长时间运行的事务\n"
+                "3. 优化事务范围，减少锁定时间"
+            )
+        
+        # 磁盘空间不足
+        if "disk full" in error_str.lower() or "no space left" in error_str.lower():
+            return (
+                "磁盘空间不足\n\n"
+                "可能的原因：\n"
+                "• 数据库数据目录所在磁盘已满\n"
+                "• 临时表空间不足\n\n"
+                "建议操作：\n"
+                "1. 清理磁盘空间\n"
+                "2. 扩展数据库存储\n"
+                "3. 清理临时文件和日志"
+            )
+        
+        # 默认错误信息
+        return (
+            f"执行SQL语句时出错\n\n"
+            f"错误信息：{error_str}\n\n"
+            "建议操作：\n"
+            "1. 检查SQL语句是否正确\n"
+            "2. 确认数据库连接状态\n"
+            "3. 查看数据库日志获取更多信息"
+        )

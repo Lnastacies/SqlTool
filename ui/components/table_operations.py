@@ -12,10 +12,23 @@ class TableOperations:
     def __init__(self, main_window):
         self.main_window = main_window
         self.logger = main_window.logger
+
+    def _ensure_database_context(self):
+        """确保数据库连接上下文指向当前数据库"""
+        if not hasattr(self.main_window, 'db_connection') or not self.main_window.db_connection:
+            return
+        current_db = self.main_window.current_db
+        if current_db and self.main_window.current_db_type in ('MySQL', 'MariaDB'):
+            try:
+                with self.main_window.db_connection.cursor() as cursor:
+                    cursor.execute(f"USE `{current_db}`")
+            except Exception:
+                pass
     
     def open_table(self, table_name):
         """打开表"""
         try:
+            self._ensure_database_context()
             # 创建新的查询标签页
             self.main_window.add_new_query_tab()
             
@@ -40,6 +53,7 @@ class TableOperations:
     def design_table(self, table_name):
         """设计表"""
         try:
+            self._ensure_database_context()
             # 使用表设计器
             from .table_designer import TableDesigner
             designer = TableDesigner(self.main_window, table_name)
@@ -53,6 +67,7 @@ class TableOperations:
     def new_table(self):
         """新建表"""
         try:
+            self._ensure_database_context()
             # 使用表设计器
             from .table_designer import TableDesigner
             designer = TableDesigner(self.main_window)
@@ -76,8 +91,7 @@ class TableOperations:
                 
                 QMessageBox.information(self.main_window, "删除表成功", f"表 {table_name} 删除成功")
                 self.logger.log('INFO', f"删除表: {table_name}")
-                # 刷新对象树
-                self.main_window.load_database_objects()
+                self.main_window.left_panel.load_connections_to_tree(show_only_current=False)
         except Exception as e:
             QMessageBox.critical(self.main_window, "删除表失败", f"删除表 {table_name} 时出错: {str(e)}")
             self.logger.log('ERROR', f"删除表失败: {str(e)}")
@@ -85,6 +99,7 @@ class TableOperations:
     def truncate_table(self, table_name, is_truncate):
         """清空表或截断表"""
         try:
+            self._ensure_database_context()
             # 确认操作
             action = "截断" if is_truncate else "清空"
             if QMessageBox.question(self.main_window, f"{action}表", f"确定要{action}表 {table_name} 吗？此操作不可恢复！", 
@@ -106,6 +121,7 @@ class TableOperations:
     def copy_table(self, table_name, copy_structure, copy_data):
         """复制表"""
         try:
+            self._ensure_database_context()
             # 获取新表名
             new_table_name, ok = QInputDialog.getText(self.main_window, "复制表", f"请输入新表名 (原表: {table_name}):")
             if not ok or not new_table_name:
@@ -125,8 +141,7 @@ class TableOperations:
                     self.main_window.db_connection.commit()
                 QMessageBox.information(self.main_window, "复制表成功", f"表 {table_name} 复制成功为 {new_table_name}")
                 self.logger.log('INFO', f"复制表: {table_name} -> {new_table_name}")
-                # 刷新对象树
-                self.main_window.load_database_objects()
+                self.main_window.left_panel.load_connections_to_tree(show_only_current=False)
                 return
             
             # 执行SQL
@@ -136,8 +151,7 @@ class TableOperations:
             
             QMessageBox.information(self.main_window, "复制表成功", f"表 {table_name} 复制成功为 {new_table_name}")
             self.logger.log('INFO', f"复制表: {table_name} -> {new_table_name}")
-            # 刷新对象树
-            self.main_window.load_database_objects()
+            self.main_window.left_panel.load_connections_to_tree(show_only_current=False)
         except Exception as e:
             QMessageBox.critical(self.main_window, "复制表失败", f"复制表 {table_name} 时出错: {str(e)}")
             self.logger.log('ERROR', f"复制表失败: {str(e)}")
@@ -145,6 +159,7 @@ class TableOperations:
     def dump_sql(self, table_name, dump_structure, dump_data):
         """转储SQL文件"""
         try:
+            self._ensure_database_context()
             # 打开文件保存对话框
             from PyQt6.QtWidgets import QFileDialog
             file_path, _ = QFileDialog.getSaveFileName(
@@ -205,6 +220,7 @@ class TableOperations:
     def maintain_table(self, table_name, operation):
         """维护表"""
         try:
+            self._ensure_database_context()
             # 执行维护操作
             with self.main_window.db_connection.cursor() as cursor:
                 cursor.execute(f"{operation} TABLE {table_name}")
@@ -219,6 +235,7 @@ class TableOperations:
     def rename_table(self, table_name):
         """重命名表"""
         try:
+            self._ensure_database_context()
             # 获取新表名
             new_table_name, ok = QInputDialog.getText(self.main_window, "重命名表", f"请输入新表名 (原表: {table_name}):")
             if not ok or not new_table_name:
@@ -231,8 +248,7 @@ class TableOperations:
             
             QMessageBox.information(self.main_window, "重命名表成功", f"表 {table_name} 已重命名为 {new_table_name}")
             self.logger.log('INFO', f"重命名表: {table_name} -> {new_table_name}")
-            # 刷新对象树
-            self.main_window.load_database_objects()
+            self.main_window.left_panel.load_connections_to_tree(show_only_current=False)
         except Exception as e:
             QMessageBox.critical(self.main_window, "重命名表失败", f"重命名表 {table_name} 时出错: {str(e)}")
             self.logger.log('ERROR', f"重命名表失败: {str(e)}")
@@ -240,6 +256,7 @@ class TableOperations:
     def show_table_info(self, table_name):
         """显示表信息"""
         try:
+            self._ensure_database_context()
             # 获取表信息
             with self.main_window.db_connection.cursor() as cursor:
                 # 获取表结构

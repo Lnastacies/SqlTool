@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QScrollArea
 )
 from PyQt6.QtCore import Qt
+from datetime import datetime
 
 class InfoPanel(QWidget):
     """
@@ -142,6 +143,46 @@ class InfoPanel(QWidget):
         
         main_layout.addWidget(self.tabs)
     
+    def show_object_details(self, item_type, item_name):
+        """
+        显示对象详情
+        """
+        from core.database_operations import DatabaseOperations
+        
+        if not self.main_window.state_manager.db_connection:
+            return
+        
+        try:
+            # 获取对象详情
+            if item_type == 'table':
+                db_ops = DatabaseOperations(
+                    self.main_window.state_manager.db_connection,
+                    self.main_window.state_manager.current_db_type
+                )
+                object_info = db_ops.get_table_info(item_name)
+                self.update_info('表', item_name, object_info)
+            elif item_type == 'view':
+                # 视图详情
+                object_info = {'fields': [], 'indexes': [], 'foreign_keys': [], 'ddl': ''}
+                self.update_info('视图', item_name, object_info)
+            elif item_type == 'procedure':
+                object_info = {'fields': [], 'indexes': [], 'foreign_keys': [], 'ddl': ''}
+                self.update_info('存储过程', item_name, object_info)
+            elif item_type == 'function':
+                object_info = {'fields': [], 'indexes': [], 'foreign_keys': [], 'ddl': ''}
+                self.update_info('函数', item_name, object_info)
+            elif item_type == 'trigger':
+                object_info = {'fields': [], 'indexes': [], 'foreign_keys': [], 'ddl': ''}
+                self.update_info('触发器', item_name, object_info)
+            elif item_type == 'database':
+                object_info = {'fields': [], 'indexes': [], 'foreign_keys': [], 'ddl': ''}
+                self.update_info('数据库', item_name, object_info)
+            else:
+                object_info = {'fields': [], 'indexes': [], 'foreign_keys': [], 'ddl': ''}
+                self.update_info(item_type, item_name, object_info)
+        except Exception as e:
+            self.logger.log('ERROR', f"获取对象详情失败: {str(e)}")
+    
     def update_info(self, object_type, object_name, object_info):
         """
         更新信息面板内容
@@ -149,8 +190,16 @@ class InfoPanel(QWidget):
         # 更新常规标签页
         self.name_value.setText(object_name)
         self.type_value.setText(object_type)
-        self.created_value.setText(object_info.get('created', ''))
-        self.updated_value.setText(object_info.get('updated', ''))
+        
+        created_val = object_info.get('created', '')
+        if isinstance(created_val, datetime):
+            created_val = created_val.strftime('%Y-%m-%d %H:%M:%S')
+        self.created_value.setText(str(created_val) if created_val else '')
+        
+        updated_val = object_info.get('updated', '')
+        if isinstance(updated_val, datetime):
+            updated_val = updated_val.strftime('%Y-%m-%d %H:%M:%S')
+        self.updated_value.setText(str(updated_val) if updated_val else '')
         
         # 更新字段标签页
         self.fields_table.setRowCount(0)

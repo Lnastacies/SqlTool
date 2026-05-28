@@ -59,11 +59,8 @@ class LeftPanel(QWidget):
             }
         """)
 
-        # 连接标签页
+        # 连接标签页（合并了对象浏览功能）
         self.create_connection_tab()
-
-        # 对象标签页
-        self.create_object_tab()
 
         # 收藏夹标签页
         self.create_favorites_tab()
@@ -72,11 +69,34 @@ class LeftPanel(QWidget):
     
     def create_connection_tab(self):
         """
-        创建连接标签页
+        创建连接标签页（合并了对象浏览功能）
         """
         conn_tab = QWidget()
         conn_layout = QVBoxLayout(conn_tab)
         conn_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 搜索框
+        search_layout = QHBoxLayout()
+        search_layout.setContentsMargins(8, 8, 8, 8)
+        self.connection_search = QLineEdit()
+        self.connection_search.setPlaceholderText("输入对象名称...")
+        self.connection_search.setStyleSheet("""
+            QLineEdit {
+                padding: 6px 8px;
+                font-size: 12px;
+                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
+                border: 1px solid #E0E0E0;
+                border-radius: 2px;
+                height: 28px;
+                min-width: 200px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #007ACC;
+                outline: none;
+            }
+        """)
+        search_layout.addWidget(self.connection_search)
+        conn_layout.addLayout(search_layout)
 
         # 连接树
         self.connection_tree = QTreeWidget()
@@ -84,6 +104,7 @@ class LeftPanel(QWidget):
         self.connection_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.connection_tree.customContextMenuRequested.connect(self.main_window.event_handler.on_connection_context_menu)
         self.connection_tree.itemDoubleClicked.connect(self.main_window.event_handler.on_connection_double_clicked)
+        self.connection_tree.itemClicked.connect(self.main_window.event_handler.on_connection_item_clicked)
         self.connection_tree.setIndentation(16)
         self.connection_tree.setStyleSheet("""
             QTreeWidget {
@@ -158,78 +179,16 @@ class LeftPanel(QWidget):
         conn_buttons.addWidget(self.add_group_btn)
 
         self.tab_widget.addTab(conn_tab, "连接")
-    
-    def create_object_tab(self):
-        """
-        创建对象标签页
-        """
-        obj_tab = QWidget()
-        obj_layout = QVBoxLayout(obj_tab)
-        obj_layout.setContentsMargins(0, 0, 0, 0)
-
-        # 搜索框
-        search_layout = QHBoxLayout()
-        search_layout.setContentsMargins(8, 8, 8, 8)
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("输入对象名称...")
-        self.search_edit.setStyleSheet("""
-            QLineEdit {
-                padding: 6px 8px;
-                font-size: 12px;
-                font-family: 'Segoe UI', 'SF Pro', Arial, sans-serif;
-                border: 1px solid #E0E0E0;
-                border-radius: 2px;
-                height: 28px;
-                min-width: 200px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #007ACC;
-                outline: none;
-            }
-        """)
-        search_layout.addWidget(self.search_edit)
-        obj_layout.addLayout(search_layout)
-
-        # 对象树
-        self.object_tree = QTreeWidget()
-        self.object_tree.setHeaderLabel("")
-        self.object_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.object_tree.customContextMenuRequested.connect(self.main_window.event_handler.on_object_context_menu)
-        self.object_tree.itemDoubleClicked.connect(self.main_window.on_object_double_clicked)
-        self.object_tree.itemClicked.connect(self.main_window.on_object_clicked)
-        self.object_tree.setIndentation(16)
-        self.object_tree.setStyleSheet("""
-            QTreeWidget {
-                background-color: #ffffff;
-                border: none;
-                font-family: 'Segoe UI';
-                font-size: 12px;
-            }
-            QTreeWidget::item {
-                padding: 3px 0;
-                height: 22px;
-            }
-            QTreeWidget::item:hover {
-                background-color: #E3F2FD;
-            }
-            QTreeWidget::item:selected {
-                background-color: #E3F2FD;
-                color: #333333;
-            }
-        """)
-        obj_layout.addWidget(self.object_tree)
-
-        self.tab_widget.addTab(obj_tab, "对象")
 
         # 初始化图标
         self._init_icons()
 
         # 连接搜索信号
-        self.search_timer = QTimer()
-        self.search_timer.setSingleShot(True)
-        self.search_timer.timeout.connect(self._perform_search)
-        self.search_edit.textChanged.connect(self._on_search_text_changed)
-    
+        self.connection_search_timer = QTimer()
+        self.connection_search_timer.setSingleShot(True)
+        self.connection_search_timer.timeout.connect(self._perform_search_on_connection_tree)
+        self.connection_search.textChanged.connect(self._on_connection_search_text_changed)
+
     def create_favorites_tab(self):
         """
         创建收藏夹标签页
@@ -304,13 +263,15 @@ class LeftPanel(QWidget):
         加载连接到树
         """
         self.connection_tree.clear()
+        
+        state = self.main_window.state_manager
 
         # 添加连接组
-        for group_name, connections in self.main_window.connection_groups.items():
+        for group_name, connections in state.connection_groups.items():
             # 过滤连接
             filtered_connections = []
             for conn_name in connections:
-                if not show_only_current or conn_name == self.main_window.current_connection:
+                if not show_only_current or conn_name == state.current_connection:
                     filtered_connections.append(conn_name)
 
             # 总是显示组，即使是空组
@@ -320,33 +281,33 @@ class LeftPanel(QWidget):
             group_item.setText(0, f"📁 {group_name}")
             
             for conn_name in filtered_connections:
-                if conn_name in self.main_window.saved_connections:
+                if conn_name in state.saved_connections:
                     conn_item = QTreeWidgetItem(group_item, [conn_name])
                     conn_item.setData(0, Qt.ItemDataRole.UserRole, ('connection', conn_name))
                     # 为连接添加图标
                     self._set_item_icon(conn_item, 'connection')
                     
                     # 如果是当前连接，加载数据库对象
-                    if conn_name == self.main_window.current_connection and hasattr(self.main_window, 'db_connection') and self.main_window.db_connection:
+                    if conn_name == state.current_connection and state.db_connection:
                         self._load_databases_to_connection_tree(conn_item)
         
         # 添加未分组的连接
-        for conn_name, conn_data in self.main_window.saved_connections.items():
+        for conn_name, conn_data in state.saved_connections.items():
             # 检查是否已在组中
             in_group = False
-            for group_name, connections in self.main_window.connection_groups.items():
+            for group_name, connections in state.connection_groups.items():
                 if conn_name in connections:
                     in_group = True
                     break
             
-            if not in_group and (not show_only_current or conn_name == self.main_window.current_connection):
+            if not in_group and (not show_only_current or conn_name == state.current_connection):
                 conn_item = QTreeWidgetItem(self.connection_tree, [conn_name])
                 conn_item.setData(0, Qt.ItemDataRole.UserRole, ('connection', conn_name))
                 # 为连接添加图标
                 self._set_item_icon(conn_item, 'connection')
                 
                 # 如果是当前连接，加载数据库对象
-                if conn_name == self.main_window.current_connection and hasattr(self.main_window, 'db_connection') and self.main_window.db_connection:
+                if conn_name == state.current_connection and state.db_connection:
                     self._load_databases_to_connection_tree(conn_item)
 
         # 默认折叠所有节点，只在双击时展开
@@ -354,198 +315,116 @@ class LeftPanel(QWidget):
     
     def _load_databases_to_connection_tree(self, conn_item):
         """
-        加载数据库到连接树
+        加载数据库到连接树（只加载数据库列表，不加载内部对象）
         """
-        if not hasattr(self.main_window, 'db_connection') or not self.main_window.db_connection:
+        state = self.main_window.state_manager
+        if not state.db_connection:
             return
 
         try:
-            with self.main_window.db_connection.cursor() as cursor:
-                if self.main_window.current_db_type == 'MySQL' or self.main_window.current_db_type == 'MariaDB':
-                    # 显示所有数据库
+            with state.db_connection.cursor() as cursor:
+                if state.current_db_type == 'MySQL' or state.current_db_type == 'MariaDB':
                     cursor.execute("SHOW DATABASES")
                     databases = cursor.fetchall()
-
                     for db in databases:
                         db_name = db['Database'] if isinstance(db, dict) else db[0]
                         if not db_name:
                             continue
-                        db_item = QTreeWidgetItem(conn_item, [db_name])
-                        db_item.setData(0, Qt.ItemDataRole.UserRole, ('database', db_name))
-                        self._set_item_icon(db_item, 'database')
-
-                        # 加载表文件夹
-                        tables_item = QTreeWidgetItem(db_item, ['表'])
-                        tables_item.setData(0, Qt.ItemDataRole.UserRole, ('tables', db_name))
-                        self._set_item_icon(tables_item, 'tables')
-
-                        # 加载视图文件夹
-                        views_item = QTreeWidgetItem(db_item, ['视图'])
-                        views_item.setData(0, Qt.ItemDataRole.UserRole, ('views', db_name))
-                        self._set_item_icon(views_item, 'views')
-
-                        # 加载函数文件夹
-                        functions_item = QTreeWidgetItem(db_item, ['函数'])
-                        functions_item.setData(0, Qt.ItemDataRole.UserRole, ('functions', db_name))
-                        self._set_item_icon(functions_item, 'functions')
-
-                        # 加载事件文件夹
-                        events_item = QTreeWidgetItem(db_item, ['事件'])
-                        events_item.setData(0, Qt.ItemDataRole.UserRole, ('events', db_name))
-                        self._set_item_icon(events_item, 'events')
-
-                        # 加载查询文件夹
-                        queries_item = QTreeWidgetItem(db_item, ['查询'])
-                        queries_item.setData(0, Qt.ItemDataRole.UserRole, ('queries', db_name))
-                        self._set_item_icon(queries_item, 'queries')
-
-                        # 加载报表文件夹
-                        reports_item = QTreeWidgetItem(db_item, ['报表'])
-                        reports_item.setData(0, Qt.ItemDataRole.UserRole, ('reports', db_name))
-                        self._set_item_icon(reports_item, 'reports')
-
-                        # 加载备份文件夹
-                        backups_item = QTreeWidgetItem(db_item, ['备份'])
-                        backups_item.setData(0, Qt.ItemDataRole.UserRole, ('backups', db_name))
-                        self._set_item_icon(backups_item, 'backups')
-
-                        # 加载各种对象类型
-                        try:
-                            cursor.execute(f"USE {db_name}")
-                            
-                            # 加载表
-                            cursor.execute("SHOW TABLES")
-                            tables = cursor.fetchall()
-                            
-                            for table in tables:
-                                table_name = table[f'Tables_in_{db_name}'] if isinstance(table, dict) else table[0]
-                                table_item = QTreeWidgetItem(tables_item, [table_name])
-                                table_item.setData(0, Qt.ItemDataRole.UserRole, ('table', table_name))
-                                self._set_item_icon(table_item, 'table')
-                            
-                            # 加载视图
-                            cursor.execute("SHOW VIEWS")
-                            views = cursor.fetchall()
-                            
-                            for view in views:
-                                view_name = view[f'Views_in_{db_name}'] if isinstance(view, dict) else view[0]
-                                view_item = QTreeWidgetItem(views_item, [view_name])
-                                view_item.setData(0, Qt.ItemDataRole.UserRole, ('view', view_name))
-                                self._set_item_icon(view_item, 'view')
-                            
-                            # 加载函数
-                            cursor.execute("SHOW FUNCTION STATUS WHERE Db = %s", (db_name,))
-                            functions = cursor.fetchall()
-                            
-                            for func in functions:
-                                func_name = func['Name'] if isinstance(func, dict) else func[1]
-                                func_item = QTreeWidgetItem(functions_item, [func_name])
-                                func_item.setData(0, Qt.ItemDataRole.UserRole, ('function', func_name))
-                                self._set_item_icon(func_item, 'function')
-                            
-                            # 加载事件
-                            cursor.execute("SHOW EVENTS WHERE Db = %s", (db_name,))
-                            events = cursor.fetchall()
-                            
-                            for event in events:
-                                event_name = event['Name'] if isinstance(event, dict) else event[1]
-                                event_item = QTreeWidgetItem(events_item, [event_name])
-                                event_item.setData(0, Qt.ItemDataRole.UserRole, ('event', event_name))
-                                self._set_item_icon(event_item, 'event')
-                        except Exception as e:
-                            self.logger.log('WARNING', f"加载数据库对象失败: {e}")
-                elif self.main_window.current_db_type == 'PostgreSQL':
-                    # PostgreSQL显示所有数据库
+                        self._add_database_to_tree(conn_item, db_name)
+                elif state.current_db_type == 'PostgreSQL':
                     cursor.execute("SELECT datname FROM pg_database WHERE datistemplate = false")
                     databases = cursor.fetchall()
-
                     for db in databases:
                         db_name = db[0]
-                        db_item = QTreeWidgetItem(conn_item, [db_name])
-                        db_item.setData(0, Qt.ItemDataRole.UserRole, ('database', db_name))
-                        self._set_item_icon(db_item, 'database')
-
-                        # 添加表文件夹
-                        tables_item = QTreeWidgetItem(db_item, ['表'])
-                        tables_item.setData(0, Qt.ItemDataRole.UserRole, ('tables', db_name))
-                        self._set_item_icon(tables_item, 'tables')
-
-                        # 添加视图文件夹
-                        views_item = QTreeWidgetItem(db_item, ['视图'])
-                        views_item.setData(0, Qt.ItemDataRole.UserRole, ('views', db_name))
-                        self._set_item_icon(views_item, 'views')
-
-                        # 添加函数文件夹
-                        functions_item = QTreeWidgetItem(db_item, ['函数'])
-                        functions_item.setData(0, Qt.ItemDataRole.UserRole, ('functions', db_name))
-                        self._set_item_icon(functions_item, 'functions')
-
-                        # 添加事件文件夹
-                        events_item = QTreeWidgetItem(db_item, ['事件'])
-                        events_item.setData(0, Qt.ItemDataRole.UserRole, ('events', db_name))
-                        self._set_item_icon(events_item, 'events')
-
-                        # 添加查询文件夹
-                        queries_item = QTreeWidgetItem(db_item, ['查询'])
-                        queries_item.setData(0, Qt.ItemDataRole.UserRole, ('queries', db_name))
-                        self._set_item_icon(queries_item, 'queries')
-
-                        # 添加报表文件夹
-                        reports_item = QTreeWidgetItem(db_item, ['报表'])
-                        reports_item.setData(0, Qt.ItemDataRole.UserRole, ('reports', db_name))
-                        self._set_item_icon(reports_item, 'reports')
-
-                        # 添加备份文件夹
-                        backups_item = QTreeWidgetItem(db_item, ['备份'])
-                        backups_item.setData(0, Qt.ItemDataRole.UserRole, ('backups', db_name))
-                        self._set_item_icon(backups_item, 'backups')
-                elif self.main_window.current_db_type == 'SQL Server':
-                    # SQL Server显示所有数据库
+                        self._add_database_to_tree(conn_item, db_name)
+                elif state.current_db_type == 'SQL Server':
                     cursor.execute("SELECT name FROM sys.databases")
                     databases = cursor.fetchall()
-
                     for db in databases:
                         db_name = db[0]
-                        db_item = QTreeWidgetItem(conn_item, [db_name])
-                        db_item.setData(0, Qt.ItemDataRole.UserRole, ('database', db_name))
-                        self._set_item_icon(db_item, 'database')
+                        self._add_database_to_tree(conn_item, db_name)
+        except Exception as e:
+            self.logger.log('WARNING', f"加载数据库列表失败: {e}")
 
-                        # 添加表文件夹
+    def _add_database_to_tree(self, conn_item, db_name):
+        """添加单个数据库到树中（不添加子文件夹，双击时再加载）"""
+        db_item = QTreeWidgetItem(conn_item, [db_name])
+        db_item.setData(0, Qt.ItemDataRole.UserRole, ('database', db_name))
+        self._set_item_icon(db_item, 'database')
+
+    def load_database_objects(self, db_item, db_name):
+        """加载指定数据库的对象到树中"""
+        try:
+            with self.main_window.db_connection.cursor() as cursor:
+                if self.main_window.current_db_type == 'MySQL' or self.main_window.current_db_type == 'MariaDB':
+                    cursor.execute(f"USE `{db_name}`")
+                    
+                    tables = []
+                    views = []
+                    functions = []
+                    events = []
+                    
+                    cursor.execute("SHOW TABLES")
+                    tables_result = cursor.fetchall()
+                    for table in tables_result:
+                        table_name = table[f'Tables_in_{db_name}'] if isinstance(table, dict) else table[0]
+                        tables.append(table_name)
+                    
+                    cursor.execute("SHOW FULL TABLES WHERE Table_type = 'VIEW'")
+                    views_result = cursor.fetchall()
+                    for view in views_result:
+                        view_name = view[f'Tables_in_{db_name}'] if isinstance(view, dict) else view[0]
+                        views.append(view_name)
+                    
+                    cursor.execute("SHOW FUNCTION STATUS WHERE Db = %s", (db_name,))
+                    functions_result = cursor.fetchall()
+                    for func in functions_result:
+                        func_name = func['Name'] if isinstance(func, dict) else func[1]
+                        functions.append(func_name)
+                    
+                    cursor.execute("SHOW EVENTS WHERE Db = %s", (db_name,))
+                    events_result = cursor.fetchall()
+                    for event in events_result:
+                        event_name = event['Name'] if isinstance(event, dict) else event[1]
+                        events.append(event_name)
+                    
+                    if tables:
                         tables_item = QTreeWidgetItem(db_item, ['表'])
                         tables_item.setData(0, Qt.ItemDataRole.UserRole, ('tables', db_name))
                         self._set_item_icon(tables_item, 'tables')
-
-                        # 添加视图文件夹
+                        for table_name in tables:
+                            table_item = QTreeWidgetItem(tables_item, [table_name])
+                            table_item.setData(0, Qt.ItemDataRole.UserRole, ('table', table_name))
+                            self._set_item_icon(table_item, 'table')
+                    
+                    if views:
                         views_item = QTreeWidgetItem(db_item, ['视图'])
                         views_item.setData(0, Qt.ItemDataRole.UserRole, ('views', db_name))
                         self._set_item_icon(views_item, 'views')
-
-                        # 添加函数文件夹
+                        for view_name in views:
+                            view_item = QTreeWidgetItem(views_item, [view_name])
+                            view_item.setData(0, Qt.ItemDataRole.UserRole, ('view', view_name))
+                            self._set_item_icon(view_item, 'view')
+                    
+                    if functions:
                         functions_item = QTreeWidgetItem(db_item, ['函数'])
                         functions_item.setData(0, Qt.ItemDataRole.UserRole, ('functions', db_name))
                         self._set_item_icon(functions_item, 'functions')
-
-                        # 添加事件文件夹
+                        for func_name in functions:
+                            func_item = QTreeWidgetItem(functions_item, [func_name])
+                            func_item.setData(0, Qt.ItemDataRole.UserRole, ('function', func_name))
+                            self._set_item_icon(func_item, 'function')
+                    
+                    if events:
                         events_item = QTreeWidgetItem(db_item, ['事件'])
                         events_item.setData(0, Qt.ItemDataRole.UserRole, ('events', db_name))
                         self._set_item_icon(events_item, 'events')
-
-                        # 添加查询文件夹
-                        queries_item = QTreeWidgetItem(db_item, ['查询'])
-                        queries_item.setData(0, Qt.ItemDataRole.UserRole, ('queries', db_name))
-                        self._set_item_icon(queries_item, 'queries')
-
-                        # 添加报表文件夹
-                        reports_item = QTreeWidgetItem(db_item, ['报表'])
-                        reports_item.setData(0, Qt.ItemDataRole.UserRole, ('reports', db_name))
-                        self._set_item_icon(reports_item, 'reports')
-
-                        # 添加备份文件夹
-                        backups_item = QTreeWidgetItem(db_item, ['备份'])
-                        backups_item.setData(0, Qt.ItemDataRole.UserRole, ('backups', db_name))
-                        self._set_item_icon(backups_item, 'backups')
+                        for event_name in events:
+                            event_item = QTreeWidgetItem(events_item, [event_name])
+                            event_item.setData(0, Qt.ItemDataRole.UserRole, ('event', event_name))
+                            self._set_item_icon(event_item, 'event')
         except Exception as e:
-            self.logger.log('ERROR', f"加载数据库到连接树失败: {str(e)}")
+            self.logger.log('WARNING', f"加载数据库对象失败: {e}")
     
     def _expand_all_items(self, tree):
         """
@@ -601,28 +480,26 @@ class LeftPanel(QWidget):
             # 使用文字图标作为替代
             item.setText(0, f"{self.icons[item_type]} {item.text(0)}")
     
-    def _on_search_text_changed(self, text):
+    def _on_connection_search_text_changed(self, text):
         """
         搜索文本变化时的处理
         """
-        self.search_timer.start(300)  # 300ms延迟，避免频繁搜索
+        self.connection_search_timer.start(300)
     
-    def _perform_search(self):
+    def _perform_search_on_connection_tree(self):
         """
-        执行搜索
+        在连接树上执行搜索
         """
-        search_text = self.search_edit.text().lower()
+        search_text = self.connection_search.text().lower()
         if not search_text:
-            # 搜索文本为空，显示所有节点
-            self._show_all_items(self.object_tree)
+            self._show_all_items_on_tree(self.connection_tree)
             return
         
-        # 搜索并过滤节点
-        self._filter_items(self.object_tree, search_text)
+        self._filter_items_on_tree(self.connection_tree, search_text)
     
-    def _show_all_items(self, tree):
+    def _show_all_items_on_tree(self, tree):
         """
-        显示所有节点
+        显示树上的所有节点
         """
         for i in range(tree.topLevelItemCount()):
             item = tree.topLevelItem(i)
@@ -638,9 +515,9 @@ class LeftPanel(QWidget):
             child.setHidden(False)
             self._show_all_children(child)
     
-    def _filter_items(self, tree, search_text):
+    def _filter_items_on_tree(self, tree, search_text):
         """
-        过滤节点
+        过滤树上的节点
         """
         for i in range(tree.topLevelItemCount()):
             item = tree.topLevelItem(i)
@@ -650,11 +527,9 @@ class LeftPanel(QWidget):
         """
         过滤单个节点
         """
-        # 检查当前节点是否匹配
         item_text = item.text(0).lower()
         matches = search_text in item_text
         
-        # 检查子节点
         has_matching_child = False
         for i in range(item.childCount()):
             child = item.child(i)
@@ -662,7 +537,6 @@ class LeftPanel(QWidget):
             if child_matches:
                 has_matching_child = True
         
-        # 决定是否显示当前节点
         if matches or has_matching_child:
             item.setHidden(False)
             return True

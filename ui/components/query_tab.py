@@ -308,18 +308,22 @@ class QueryTab(QWidget):
                         QMessageBox.warning(self.main_window, "切换数据库失败", "无效的数据库名称")
                         return
                     
-                    # 执行切换数据库操作
-                    sql = f"USE {new_db_name}"
+                    # 先更新 current_db
+                    self.main_window.current_db = new_db_name
+                    
+                    # 刷新连接树（会遍历所有数据库）
+                    self.main_window.left_panel.load_connections_to_tree(show_only_current=False)
+                    
+                    # 再次执行 USE 确保数据库上下文正确（因为 load_connections_to_tree 会改变当前数据库）
+                    sql = f"USE `{new_db_name}`"
                     self.logger.log('INFO', f"执行SQL: {sql}")
                     with self.main_window.db_connection.cursor() as cursor:
                         cursor.execute(sql)
-                        self.main_window.current_db = new_db_name
-                        # 重新加载数据库对象
-                        self.main_window.load_database_objects()
-                        # 更新连接状态
-                        self.main_window.connection_status.setText(f"已连接: {self.main_window.current_connection} ({self.main_window.current_db_type}) - 数据库: {new_db_name}")
-                        self.main_window.status_info.setText("已切换数据库")
-                        self.logger.log('INFO', f"切换到数据库: {new_db_name} 成功")
+                    
+                    # 更新连接状态
+                    self.main_window.connection_status.setText(f"已连接: {self.main_window.current_connection} ({self.main_window.current_db_type}) - 数据库: {new_db_name}")
+                    self.main_window.status_info.setText("已切换数据库")
+                    self.logger.log('INFO', f"切换到数据库: {new_db_name} 成功")
                 except Exception as e:
                     self.logger.log('ERROR', f"切换数据库失败: {str(e)}, 数据库名称: '{new_db_name}'")
                     from PyQt6.QtWidgets import QMessageBox
@@ -549,7 +553,7 @@ class QueryTab(QWidget):
                 border: 1px solid #b0b0b0;
             }
         """)
-        refresh_btn.clicked.connect(lambda: self.main_window.event_handler.show_feature_not_implemented("刷新"))
+        refresh_btn.clicked.connect(self.refresh_result)
         result_toolbar_layout.addWidget(refresh_btn)
         
         # 导出按钮

@@ -1,440 +1,440 @@
 #!/usr/bin/env python3
 """
-ER图逆向工程模块
+ER图生成器
 """
 
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QWidget, QLabel, QComboBox, QSplitter, QTableWidget, QTableWidgetItem, QMessageBox
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPainter, QPen, QBrush, QColor, QFont
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QPushButton,
+    QLabel, QComboBox, QCheckBox, QSlider, QSpinBox, QGraphicsView,
+    QGraphicsScene, QGraphicsItem, QGraphicsTextItem, QGraphicsRectItem,
+    QGraphicsLineItem, QGraphicsSimpleTextItem, QMessageBox, QFileDialog,
+    QToolBar, QSpinBox, QColorDialog, QFontDialog, QInputDialog
+)
+from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QRect
+from PyQt6.QtGui import (
+    QPen, QBrush, QColor, QPainter, QFont, QPixmap, QImage,
+    QPainterPath, QPolygonF
+)
 
-class ERDiagram(QDialog):
-    """
-    ER图逆向工程类
-    """
+
+class ERTableItem(QGraphicsRectItem):
+    """ER图中的表项"""
+    
+    def __init__(self, table_name, columns, x, y, parent=None):
+        super().__init__(parent)
+        self.table_name = table_name
+        self.columns = columns
+        self.setRect(QRectF(x, y, 200, 30 + len(columns) * 22))
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        
+        # 颜色
+        self.setBrush(QBrush(QColor("#E3F2FD")))
+        self.setPen(QPen(QColor("#1A73E8"), 2))
+        
+        # 列位置
+        self.column_positions = {}
+        for i, col in enumerate(columns):
+            self.column_positions[col['name']] = y + 35 + i * 22
+    
+    def paint(self, painter, option, widget=None):
+        """绘制表项"""
+        super().paint(painter, option, widget)
+        
+        # 绘制表名
+        font = QFont("Segoe UI", 10, QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.setPen(QColor("#1A73E8"))
+        painter.drawText(self.rect().topLeft() + QPointF(10, 22), self.table_name)
+        
+        # 绘制列
+        font = QFont("Segoe UI", 9)
+        painter.setFont(font)
+        painter.setPen(QColor("#333333"))
+        
+        for i, col in enumerate(self.columns):
+            y = self.rect().top() + 35 + i * 22
+            name = col['name']
+            col_type = col.get('type', '')[:20]
+            
+            # 列名
+            painter.drawText(QPointF(self.rect().left() + 10, y + 14), name)
+            
+            # 类型
+            painter.drawText(QPointF(self.rect().left() + 120, y + 14), col_type)
+            
+            # 主键/外键标识
+            if col.get('primary_key'):
+                painter.setPen(QColor("#FF9800"))
+                painter.drawText(QPointF(self.rect().left() + 195, y + 14), "🔑")
+                painter.setPen(QColor("#333333"))
+            elif col.get('foreign_key'):
+                painter.setPen(QColor("#4CAF50"))
+                painter.drawText(QPointF(self.rect().left() + 195, y + 14), "🔗")
+                painter.setPen(QColor("#333333"))
+
+
+class ERRelationLine(QGraphicsLineItem):
+    """ER图中的关系线"""
+    
+    def __init__(self, start_item, start_col, end_item, end_col, relation_type="1:N", parent=None):
+        super().__init__(parent)
+        self.start_item = start_item
+        self.end_item = end_item
+        self.relation_type = relation_type
+        
+        # 设置线条样式
+        pen = QPen(QColor("#666666"), 1.5)
+        if relation_type == "1:1":
+            pen.setStyle(Qt.PenStyle.DashLine)
+        self.setPen(pen)
+        
+        self.update_line()
+    
+    def update_line(self):
+        """更新线条位置"""
+        if self.start_item and self.end_item:
+            start = self.start_item.scenePos() + QPointF(200, 60)
+            end = self.end_item.scenePos() + QPointF(0, 60)
+            self.setLine(start.x(), start.y(), end.x(), end.y())
+    
+    def paint(self, painter, option, widget=None):
+        """绘制关系线"""
+        super().paint(painter, option, widget)
+        
+        # 绘制关系符号
+        line = self.line()
+        
+        if self.relation_type == "1:N":
+            # 一端画1，另一端画N
+            painter.drawText(line.p1() + QPointF(-15, -5), "1")
+            painter.drawText(line.p2() + QPointF(5, -5), "N")
+        elif self.relation_type == "1:1":
+            painter.drawText(line.p1() + QPointF(-15, -5), "1")
+            painter.drawText(line.p2() + QPointF(5, -5), "1")
+
+
+class ERDiagramGenerator(QDialog):
+    """ER图生成器"""
+    
     def __init__(self, main_window):
         super().__init__(main_window)
         self.main_window = main_window
         self.logger = main_window.logger
+        self.tables = []
+        self.relations = []
+        self.table_items = {}
         
-        self.setWindowTitle("ER图表")
-        self.setGeometry(100, 100, 1000, 600)
+        self.setWindowTitle("ER图")
+        self.setGeometry(100, 100, 1200, 800)
+        self.setMinimumSize(900, 600)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f5f5f5;
+                font-family: 'Segoe UI', 'Microsoft YaHei', Arial;
+            }
+            QToolBar {
+                background-color: #f8f8f8;
+                border: none;
+                border-bottom: 1px solid #e0e0e0;
+                padding: 4px;
+                spacing: 4px;
+            }
+            QPushButton {
+                background-color: #f0f0f0;
+                border: 1px solid #c0c0c0;
+                border-radius: 3px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+            QPushButton:pressed {
+                background-color: #d0d0d0;
+            }
+            QGraphicsView {
+                border: 1px solid #d0d0d0;
+                background-color: #ffffff;
+            }
+            QSpinBox {
+                border: 1px solid #d0d0d0;
+                border-radius: 3px;
+                padding: 4px;
+            }
+        """)
         
         self.setup_ui()
+        self.load_tables()
     
     def setup_ui(self):
-        """
-        设置UI
-        """
-        # 主布局
-        main_layout = QVBoxLayout(self)
+        """设置UI"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
         # 工具栏
-        toolbar = QWidget()
-        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar = QToolBar()
         
-        # 数据库选择
-        db_label = QLabel("数据库:")
-        self.db_combo = QComboBox()
-        self.load_databases()
-        
-        # 按钮
-        generate_btn = QPushButton("生成ER图")
-        export_btn = QPushButton("导出图片")
         refresh_btn = QPushButton("刷新")
+        refresh_btn.clicked.connect(self.load_tables)
+        toolbar.addWidget(refresh_btn)
         
-        toolbar_layout.addWidget(db_label)
-        toolbar_layout.addWidget(self.db_combo)
-        toolbar_layout.addStretch()
-        toolbar_layout.addWidget(generate_btn)
-        toolbar_layout.addWidget(export_btn)
-        toolbar_layout.addWidget(refresh_btn)
+        toolbar.addSeparator()
         
-        main_layout.addWidget(toolbar)
+        auto_layout_btn = QPushButton("自动布局")
+        auto_layout_btn.clicked.connect(self.auto_layout)
+        toolbar.addWidget(auto_layout_btn)
         
-        # 分割器
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        toolbar.addSeparator()
         
-        # 左侧表列表
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
+        export_btn = QPushButton("导出图片")
+        export_btn.clicked.connect(self.export_image)
+        toolbar.addWidget(export_btn)
         
-        tables_label = QLabel("表列表")
-        self.tables_table = QTableWidget()
-        self.tables_table.setColumnCount(2)
-        self.tables_table.setHorizontalHeaderLabels(["表名", "描述"])
+        print_btn = QPushButton("打印")
+        print_btn.clicked.connect(self.print_diagram)
+        toolbar.addWidget(print_btn)
         
-        left_layout.addWidget(tables_label)
-        left_layout.addWidget(self.tables_table)
+        toolbar.addSeparator()
         
-        # 右侧ER图绘制区域
-        right_widget = QWidget()
-        self.er_canvas = ERCanvas(right_widget)
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.addWidget(self.er_canvas)
+        toolbar.addWidget(QLabel("缩放:"))
+        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self.zoom_slider.setRange(25, 200)
+        self.zoom_slider.setValue(100)
+        self.zoom_slider.setMaximumWidth(150)
+        self.zoom_slider.valueChanged.connect(self.on_zoom_changed)
+        toolbar.addWidget(self.zoom_slider)
         
-        splitter.addWidget(left_widget)
-        splitter.addWidget(right_widget)
-        splitter.setSizes([200, 800])
+        zoom_label = QLabel("100%")
+        self.zoom_label = zoom_label
+        toolbar.addWidget(zoom_label)
         
-        main_layout.addWidget(splitter)
+        layout.addWidget(toolbar)
         
-        # 连接信号
-        generate_btn.clicked.connect(self.generate_er_diagram)
-        export_btn.clicked.connect(self.export_diagram)
-        refresh_btn.clicked.connect(self.refresh_tables)
-        self.db_combo.currentTextChanged.connect(self.refresh_tables)
+        # 图形视图
+        self.scene = QGraphicsScene()
+        self.scene.setSceneRect(-2000, -2000, 4000, 4000)
+        
+        self.graphics_view = QGraphicsView(self.scene)
+        self.graphics_view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.graphics_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.graphics_view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        
+        layout.addWidget(self.graphics_view, 1)
+        
+        # 底部信息栏
+        info_bar = QWidget()
+        info_bar.setStyleSheet("background-color: #f0f0f0; padding: 4px 12px; border-top: 1px solid #e0e0e0;")
+        info_layout = QHBoxLayout(info_bar)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.info_label = QLabel("准备生成ER图...")
+        info_layout.addWidget(self.info_label)
+        info_layout.addStretch()
+        
+        layout.addWidget(info_bar)
     
-    def load_databases(self):
-        """
-        加载数据库列表
-        """
+    def load_tables(self):
+        """加载表结构"""
+        self.scene.clear()
+        self.table_items.clear()
+        self.tables.clear()
+        self.relations.clear()
+        
         try:
-            if hasattr(self.main_window, 'db_connection'):
-                with self.main_window.db_connection.cursor() as cursor:
-                    if self.main_window.current_db_type == 'MySQL':
-                        cursor.execute("SHOW DATABASES")
-                        databases = cursor.fetchall()
-                        for db in databases:
-                            db_name = db['Database'] if isinstance(db, dict) else db[0]
-                            self.db_combo.addItem(db_name)
-                    elif self.main_window.current_db_type == 'PostgreSQL':
-                        cursor.execute("SELECT datname FROM pg_database WHERE datistemplate = false")
-                        databases = cursor.fetchall()
-                        for db in databases:
-                            db_name = db[0]
-                            self.db_combo.addItem(db_name)
-                    elif self.main_window.current_db_type == 'SQL Server':
-                        cursor.execute("SELECT name FROM sys.databases WHERE database_id > 4")
-                        databases = cursor.fetchall()
-                        for db in databases:
-                            db_name = db[0]
-                            self.db_combo.addItem(db_name)
-        except Exception as e:
-            self.logger.log('ERROR', f"加载数据库列表失败: {str(e)}")
-    
-    def refresh_tables(self):
-        """
-        刷新表列表
-        """
-        try:
-            db_name = self.db_combo.currentText()
-            if not db_name:
-                return
+            self.main_window.table_operations._ensure_database_context()
             
             with self.main_window.db_connection.cursor() as cursor:
-                # 切换到选中的数据库
-                if self.main_window.current_db_type == 'MySQL':
-                    cursor.execute(f"USE {db_name}")
-                    cursor.execute("SHOW TABLES")
-                    tables = cursor.fetchall()
+                # 获取所有表
+                if self.main_window.current_db_type in ('MySQL', 'MariaDB'):
+                    cursor.execute("""
+                        SELECT TABLE_NAME 
+                        FROM INFORMATION_SCHEMA.TABLES 
+                        WHERE TABLE_SCHEMA = %s AND TABLE_TYPE = 'BASE TABLE'
+                        ORDER BY TABLE_NAME
+                    """, (self.main_window.current_db,))
+                    table_names = [row[0] for row in cursor.fetchall()]
                     
-                    self.tables_table.setRowCount(len(tables))
-                    for i, table in enumerate(tables):
-                        table_name = table['Tables_in_' + db_name] if isinstance(table, dict) else table[0]
-                        self.tables_table.setItem(i, 0, QTableWidgetItem(table_name))
-                        
-                        # 获取表注释
-                        cursor.execute(f"SHOW TABLE STATUS LIKE '{table_name}'")
-                        status = cursor.fetchone()
-                        comment = status['Comment'] if (isinstance(status, dict) and 'Comment' in status) else ''
-                        self.tables_table.setItem(i, 1, QTableWidgetItem(comment))
                 elif self.main_window.current_db_type == 'PostgreSQL':
-                    # 切换到选中的数据库
-                    # 注意：PostgreSQL需要使用连接字符串切换数据库，这里简化处理
-                    cursor.execute(f"SELECT table_name, table_comment FROM information_schema.tables WHERE table_schema = 'public' AND table_catalog = '{db_name}'")
-                    tables = cursor.fetchall()
+                    cursor.execute("""
+                        SELECT tablename 
+                        FROM pg_tables 
+                        WHERE schemaname = 'public'
+                        ORDER BY tablename
+                    """)
+                    table_names = [row[0] for row in cursor.fetchall()]
+                else:
+                    table_names = []
+                
+                # 获取每个表的列信息
+                for table_name in table_names:
+                    columns = []
                     
-                    self.tables_table.setRowCount(len(tables))
-                    for i, table in enumerate(tables):
-                        table_name = table[0]
-                        comment = table[1] if table[1] else ''
-                        self.tables_table.setItem(i, 0, QTableWidgetItem(table_name))
-                        self.tables_table.setItem(i, 1, QTableWidgetItem(comment))
-                elif self.main_window.current_db_type == 'SQL Server':
-                    # 切换到选中的数据库
-                    cursor.execute(f"USE {db_name}")
-                    cursor.execute("SELECT name, create_date FROM sys.tables")
-                    tables = cursor.fetchall()
-                    
-                    self.tables_table.setRowCount(len(tables))
-                    for i, table in enumerate(tables):
-                        table_name = table[0]
-                        self.tables_table.setItem(i, 0, QTableWidgetItem(table_name))
-                        self.tables_table.setItem(i, 1, QTableWidgetItem(''))
-        except Exception as e:
-            self.logger.log('ERROR', f"刷新表列表失败: {str(e)}")
-    
-    def generate_er_diagram(self):
-        """
-        生成ER图
-        """
-        try:
-            db_name = self.db_combo.currentText()
-            if not db_name:
-                QMessageBox.warning(self, "生成ER图", "请先选择数据库")
-                return
-            
-            # 加载表结构和关系
-            tables = []
-            relationships = []
-            
-            with self.main_window.db_connection.cursor() as cursor:
-                # 切换到选中的数据库
-                if self.main_window.current_db_type == 'MySQL':
-                    cursor.execute(f"USE {db_name}")
-                    
-                    # 获取所有表
-                    cursor.execute("SHOW TABLES")
-                    table_results = cursor.fetchall()
-                    
-                    for table_result in table_results:
-                        table_name = table_result['Tables_in_' + db_name] if isinstance(table_result, dict) else table_result[0]
-                        
-                        # 获取表结构
-                        cursor.execute(f"SHOW COLUMNS FROM {table_name}")
-                        columns = cursor.fetchall()
-                        
-                        # 获取外键关系
-                        cursor.execute(f"SHOW CREATE TABLE {table_name}")
-                        create_table = cursor.fetchone()
-                        create_table_sql = create_table['Create Table'] if isinstance(create_table, dict) else create_table[1]
-                        
-                        # 解析外键关系
-                        import re
-                        fk_pattern = r'CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)` \(`(.*?)`\)'
-                        fk_matches = re.findall(fk_pattern, create_table_sql)
-                        
-                        for fk_match in fk_matches:
-                            fk_name, fk_column, ref_table, ref_column = fk_match
-                            relationships.append({
-                                'source_table': table_name,
-                                'source_column': fk_column,
-                                'target_table': ref_table,
-                                'target_column': ref_column
-                            })
-                        
-                        # 构建表结构
-                        table = {
-                            'name': table_name,
-                            'columns': []
-                        }
-                        
-                        for col in columns:
-                            col_name = col['Field'] if isinstance(col, dict) else col[0]
-                            col_type = col['Type'] if isinstance(col, dict) else col[1]
-                            col_null = col['Null'] if isinstance(col, dict) else col[2]
-                            col_key = col['Key'] if isinstance(col, dict) else col[4]
-                            col_comment = col['Comment'] if (isinstance(col, dict) and 'Comment' in col) else ''
-                            
-                            table['columns'].append({
-                                'name': col_name,
-                                'type': col_type,
-                                'null': col_null == 'YES',
-                                'key': col_key,
-                                'comment': col_comment
-                            })
-                        
-                        tables.append(table)
-                elif self.main_window.current_db_type == 'PostgreSQL':
-                    # 简化处理，获取表和外键
-                    cursor.execute(f"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_catalog = '{db_name}'")
-                    table_results = cursor.fetchall()
-                    
-                    for table_result in table_results:
-                        table_name = table_result[0]
-                        
-                        # 获取表结构
-                        cursor.execute(f"SELECT column_name, data_type, is_nullable, column_default, column_comment FROM information_schema.columns WHERE table_name = '{table_name}' AND table_schema = 'public' AND table_catalog = '{db_name}'")
-                        columns = cursor.fetchall()
-                        
-                        # 获取外键关系
+                    if self.main_window.current_db_type in ('MySQL', 'MariaDB'):
                         cursor.execute("""
                             SELECT 
-                                conname, 
-                                a.attname as source_column, 
-                                cl.relname as target_table, 
-                                b.attname as target_column
-                            FROM 
-                                pg_constraint con
-                            JOIN 
-                                pg_class cl ON con.confrelid = cl.oid
-                            JOIN 
-                                pg_attribute a ON a.attnum = con.conkey[1] AND a.attrelid = con.conrelid
-                            JOIN 
-                                pg_attribute b ON b.attnum = con.confkey[1] AND b.attrelid = con.confrelid
-                            WHERE 
-                                con.contype = 'f' AND 
-                                con.conrelid = (SELECT oid FROM pg_class WHERE relname = '{table_name}')
-                        """)
-                        fk_results = cursor.fetchall()
+                                COLUMN_NAME,
+                                DATA_TYPE,
+                                COLUMN_KEY,
+                                REFERENCED_TABLE_NAME,
+                                REFERENCED_COLUMN_NAME
+                            FROM INFORMATION_SCHEMA.COLUMNS
+                            WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
+                            ORDER BY ORDINAL_POSITION
+                        """, (self.main_window.current_db, table_name))
                         
-                        for fk_result in fk_results:
-                            fk_name, source_column, target_table, target_column = fk_result
-                            relationships.append({
-                                'source_table': table_name,
-                                'source_column': source_column,
-                                'target_table': target_table,
-                                'target_column': target_column
+                        for row in cursor.fetchall():
+                            columns.append({
+                                'name': row[0],
+                                'type': row[1],
+                                'primary_key': row[2] == 'PRI',
+                                'foreign_key': row[3] is not None,
+                                'ref_table': row[3],
+                                'ref_column': row[4]
                             })
-                        
-                        # 构建表结构
-                        table = {
-                            'name': table_name,
-                            'columns': []
-                        }
-                        
-                        for col in columns:
-                            col_name, col_type, is_nullable, col_default, col_comment = col
-                            
-                            table['columns'].append({
-                                'name': col_name,
-                                'type': col_type,
-                                'null': is_nullable == 'YES',
-                                'key': '',
-                                'comment': col_comment
-                            })
-                        
-                        tables.append(table)
-                elif self.main_window.current_db_type == 'SQL Server':
-                    # 切换到选中的数据库
-                    cursor.execute(f"USE {db_name}")
                     
-                    # 获取所有表
-                    cursor.execute("SELECT name FROM sys.tables")
-                    table_results = cursor.fetchall()
-                    
-                    for table_result in table_results:
-                        table_name = table_result[0]
+                    elif self.main_window.current_db_type == 'PostgreSQL':
+                        cursor.execute("""
+                            SELECT 
+                                c.column_name,
+                                c.data_type,
+                                CASE WHEN tc.constraint_type = 'PRIMARY KEY' THEN true ELSE false END as is_pk
+                            FROM information_schema.columns c
+                            LEFT JOIN information_schema.key_column_usage kcu 
+                                ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name
+                            LEFT JOIN information_schema.table_constraints tc 
+                                ON kcu.constraint_name = tc.constraint_name
+                            WHERE c.table_name = %s
+                            ORDER BY c.ordinal_position
+                        """, (table_name,))
                         
-                        # 获取表结构
-                        cursor.execute(f"SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = '{table_name}'")
-                        columns = cursor.fetchall()
-                        
-                        # 构建表结构
-                        table = {
-                            'name': table_name,
-                            'columns': []
-                        }
-                        
-                        for col in columns:
-                            col_name, col_type, is_nullable, col_default = col
-                            
-                            table['columns'].append({
-                                'name': col_name,
-                                'type': col_type,
-                                'null': is_nullable == 'YES',
-                                'key': '',
-                                'comment': ''
+                        for row in cursor.fetchall():
+                            columns.append({
+                                'name': row[0],
+                                'type': row[1],
+                                'primary_key': row[2],
+                                'foreign_key': False
                             })
-                        
-                        tables.append(table)
+                    
+                    self.tables.append({
+                        'name': table_name,
+                        'columns': columns
+                    })
             
-            # 绘制ER图
-            self.er_canvas.draw_er_diagram(tables, relationships)
+            self.generate_er_diagram()
+            self.info_label.setText(f"已加载 {len(self.tables)} 个表")
             
-            QMessageBox.information(self, "生成ER图", "ER图生成成功")
         except Exception as e:
-            QMessageBox.critical(self, "生成ER图失败", f"生成ER图时出错: {str(e)}")
-            self.logger.log('ERROR', f"生成ER图失败: {str(e)}")
+            QMessageBox.critical(self, "加载失败", f"加载表结构时出错:\n{str(e)}")
+            self.logger.log('ERROR', f"加载表结构失败: {str(e)}")
     
-    def export_diagram(self):
-        """
-        导出ER图为图片
-        """
-        from PyQt6.QtWidgets import QFileDialog
-        from PyQt6.QtGui import QPixmap
+    def generate_er_diagram(self):
+        """生成ER图"""
+        import math
         
+        # 计算布局
+        n = len(self.tables)
+        if n == 0:
+            return
+        
+        cols = math.ceil(math.sqrt(n))
+        rows = math.ceil(n / cols)
+        
+        spacing_x = 280
+        spacing_y = 180
+        start_x = 100
+        start_y = 100
+        
+        for i, table in enumerate(self.tables):
+            row = i // cols
+            col = i % cols
+            
+            x = start_x + col * spacing_x
+            y = start_y + row * spacing_y
+            
+            # 创建表项
+            item = ERTableItem(table['name'], table['columns'], x, y)
+            self.scene.addItem(item)
+            self.table_items[table['name']] = item
+            
+            # 添加关系线
+            for col in table['columns']:
+                if col.get('foreign_key') and col.get('ref_table'):
+                    ref_table = col['ref_table']
+                    if ref_table in self.table_items:
+                        relation_line = ERRelationLine(
+                            item, col['name'],
+                            self.table_items[ref_table], col.get('ref_column', 'id'),
+                            "1:N"
+                        )
+                        self.scene.addItem(relation_line)
+                        self.relations.append({
+                            'from': table['name'],
+                            'to': ref_table,
+                            'from_col': col['name'],
+                            'to_col': col.get('ref_column', 'id'),
+                            'line': relation_line
+                        })
+        
+        self.graphics_view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+    
+    def auto_layout(self):
+        """自动布局"""
+        import random
+        
+        # 简单的力导向布局
+        for _ in range(10):
+            for table_name, item in self.table_items.items():
+                # 随机移动一点点
+                dx = random.uniform(-10, 10)
+                dy = random.uniform(-10, 10)
+                item.moveBy(dx, dy)
+        
+        # 更新关系线
+        for relation in self.relations:
+            relation['line'].update_line()
+    
+    def on_zoom_changed(self, value):
+        """缩放变化"""
+        scale = value / 100.0
+        self.graphics_view.resetTransform()
+        self.graphics_view.scale(scale, scale)
+        self.zoom_label.setText(f"{value}%")
+    
+    def export_image(self):
+        """导出图片"""
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "导出ER图", "", "PNG文件 (*.png);;JPEG文件 (*.jpg);;BMP文件 (*.bmp)"
+            self, "导出ER图", "", 
+            "PNG图片 (*.png);;JPEG图片 (*.jpg);;SVG矢量图 (*.svg)"
         )
         
-        if file_path:
-            try:
-                # 捕获画布内容
-                pixmap = QPixmap(self.er_canvas.size())
-                self.er_canvas.render(pixmap)
-                pixmap.save(file_path)
-                
-                QMessageBox.information(self, "导出成功", f"ER图已导出到: {file_path}")
-            except Exception as e:
-                QMessageBox.critical(self, "导出失败", f"导出ER图时出错: {str(e)}")
-                self.logger.log('ERROR', f"导出ER图失败: {str(e)}")
-
-class ERCanvas(QWidget):
-    """
-    ER图画布类
-    """
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.tables = []
-        self.relationships = []
-        self.setMinimumSize(800, 500)
+        if not file_path:
+            return
+        
+        try:
+            rect = self.scene.sceneRect()
+            pixmap = QPixmap(int(rect.width()), int(rect.height()))
+            pixmap.fill(Qt.GlobalColor.white)
+            
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            self.scene.render(painter)
+            painter.end()
+            
+            pixmap.save(file_path)
+            QMessageBox.information(self, "导出成功", f"ER图已保存到:\n{file_path}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "导出失败", f"导出图片时出错:\n{str(e)}")
     
-    def draw_er_diagram(self, tables, relationships):
-        """
-        绘制ER图
-        """
-        self.tables = tables
-        self.relationships = relationships
-        self.update()
-    
-    def paintEvent(self, event):
-        """
-        绘制事件
-        """
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    def print_diagram(self):
+        """打印ER图"""
+        from PyQt6.QtPrintSupport import QPrinter
+        printer = QPrinter()
         
-        # 绘制背景
-        painter.fillRect(self.rect(), QColor(240, 240, 240))
-        
-        # 计算表的位置
-        table_positions = {}
-        x, y = 50, 50
-        for table in self.tables:
-            table_positions[table['name']] = (x, y)
-            x += 200
-            if x > self.width() - 200:
-                x = 50
-                y += 150
-        
-        # 绘制关系
-        for relationship in self.relationships:
-            source_table = relationship['source_table']
-            target_table = relationship['target_table']
-            
-            if source_table in table_positions and target_table in table_positions:
-                source_x, source_y = table_positions[source_table]
-                target_x, target_y = table_positions[target_table]
-                
-                # 绘制连接线
-                painter.setPen(QPen(QColor(0, 0, 0), 1))
-                painter.drawLine(
-                    source_x + 150, source_y + 50,
-                    target_x, target_y + 50
-                )
-        
-        # 绘制表
-        for table in self.tables:
-            x, y = table_positions[table['name']]
-            
-            # 绘制表框
-            painter.setPen(QPen(QColor(0, 0, 0), 1))
-            painter.setBrush(QBrush(QColor(255, 255, 255)))
-            painter.drawRect(x, y, 150, 100 + len(table['columns']) * 20)
-            
-            # 绘制表名
-            painter.setPen(QPen(QColor(0, 0, 255), 1))
-            painter.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-            painter.drawText(x + 10, y + 20, table['name'])
-            
-            # 绘制列
-            painter.setPen(QPen(QColor(0, 0, 0), 1))
-            painter.setFont(QFont("Arial", 8))
-            for i, column in enumerate(table['columns']):
-                column_text = f"{column['name']}: {column['type']}"
-                if column['key'] == 'PRI':
-                    painter.setPen(QPen(QColor(255, 0, 0), 1))
-                else:
-                    painter.setPen(QPen(QColor(0, 0, 0), 1))
-                painter.drawText(x + 10, y + 40 + i * 20, column_text)
+        from PyQt6.QtWidgets import QPrintDialog
+        dialog = QPrintDialog(printer, self)
+        if dialog.exec():
+            painter = QPainter(printer)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            self.scene.render(painter)

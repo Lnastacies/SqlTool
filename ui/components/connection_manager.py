@@ -67,10 +67,35 @@ class ConnectionManager:
         self.main_window = main_window
         self.logger = main_window.logger
     
+    def _load_or_generate_key(self):
+        """
+        加载或生成加密密钥（与核心模块保持一致）
+        """
+        import os
+        from cryptography.fernet import Fernet
+        key_file = "encryption.key"
+        if os.path.exists(key_file):
+            with open(key_file, 'rb') as f:
+                return f.read()
+        else:
+            # 生成新的密钥
+            key = Fernet.generate_key()
+            with open(key_file, 'wb') as f:
+                f.write(key)
+            self.logger.log('INFO', "生成新的加密密钥")
+            return key
+
     def load_connections(self):
         """
         加载保存的连接
         """
+        import os
+        from cryptography.fernet import Fernet
+        
+        # 确保密钥文件存在
+        key = self._load_or_generate_key()
+        fernet = Fernet(key)
+        
         conn_file = "connections.json"
         if os.path.exists(conn_file):
             try:
@@ -81,23 +106,26 @@ class ConnectionManager:
                     for conn_name, conn_data in connections.items():
                         if 'password' in conn_data and conn_data['password']:
                             try:
-                                conn_data['password'] = decrypt_password(conn_data['password'], default_key)
+                                # 尝试解密密码
+                                conn_data['password'] = fernet.decrypt(conn_data['password'].encode()).decode()
                             except Exception as e:
-                                self.logger.log('WARNING', f"解密密码失败: {e}")
-                                conn_data['password'] = ''
+                                # 解密失败，可能是明文密码，保持原密码
+                                # 不记录警告，避免干扰用户
+                                pass
                         if 'ssh_password' in conn_data and conn_data['ssh_password']:
                             try:
-                                conn_data['ssh_password'] = decrypt_password(conn_data['ssh_password'], default_key)
+                                # 尝试解密SSH密码
+                                conn_data['ssh_password'] = fernet.decrypt(conn_data['ssh_password'].encode()).decode()
                             except Exception as e:
-                                self.logger.log('WARNING', f"解密SSH密码失败: {e}")
-                                conn_data['ssh_password'] = ''
-                    self.main_window.saved_connections = connections
-                    self.main_window.connection_groups = data.get('groups', {})
+                                # 解密失败，可能是明文密码，保持原密码
+                                # 不记录警告，避免干扰用户
+                                pass
+                    self.main_window.state_manager.load_connections(connections, data.get('groups', {}))
             except Exception as e:
                 self.logger.log('ERROR', f"加载连接失败: {e}")
         else:
             # 示例连接
-            self.main_window.saved_connections = {
+            sample_connections = {
                 'Local MySQL': {
                     'type': 'MySQL',
                     'host': 'localhost',
@@ -115,29 +143,37 @@ class ConnectionManager:
                     'database': ''
                 }
             }
+            self.main_window.state_manager.load_connections(sample_connections, {})
     
     def save_connections(self):
         """
         保存连接
         """
+        import os
+        from cryptography.fernet import Fernet
+        
+        # 确保密钥文件存在
+        key = self._load_or_generate_key()
+        fernet = Fernet(key)
+        
         conn_file = "connections.json"
         try:
             # 深拷贝连接数据，避免修改原始数据
             import copy
-            connections = copy.deepcopy(self.main_window.saved_connections)
+            connections = copy.deepcopy(self.main_window.state_manager.saved_connections)
             # 加密密码
             for conn_name, conn_data in connections.items():
                 if 'password' in conn_data and conn_data['password']:
-                    conn_data['password'] = encrypt_password(conn_data['password'], default_key)
+                    conn_data['password'] = fernet.encrypt(conn_data['password'].encode()).decode()
                 if 'ssh_password' in conn_data and conn_data['ssh_password']:
-                    conn_data['ssh_password'] = encrypt_password(conn_data['ssh_password'], default_key)
+                    conn_data['ssh_password'] = fernet.encrypt(conn_data['ssh_password'].encode()).decode()
             data = {
                 'connections': connections,
-                'groups': self.main_window.connection_groups
+                'groups': self.main_window.state_manager.connection_groups
             }
             with open(conn_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            self.logger.log('INFO', f"保存了 {len(self.main_window.saved_connections)} 个连接")
+            self.logger.log('INFO', f"保存了 {len(self.main_window.state_manager.saved_connections)} 个连接")
         except Exception as e:
             self.logger.log('ERROR', f"保存连接失败: {e}")
     
@@ -145,44 +181,45 @@ class ConnectionManager:
         """
         加载连接到树
         """
-        self.main_window.connection_tree.clear()
+        tree = self.main_window.left_panel.connection_tree
+        tree.clear()
         
         # 添加连接组
-        for group_name, connections in self.main_window.connection_groups.items():
+        for group_name, connections in self.main_window.state_manager.connection_groups.items():
             # 过滤连接
             filtered_connections = []
             for conn_name in connections:
-                if not show_only_current or conn_name == self.main_window.current_connection:
+                if not show_only_current or conn_name == self.main_window.state_manager.current_connection:
                     filtered_connections.append(conn_name)
             
             if filtered_connections:
-                group_item = QTreeWidgetItem(self.main_window.connection_tree, [group_name])
+                group_item = QTreeWidgetItem(tree, [group_name])
                 group_item.setData(0, Qt.ItemDataRole.UserRole, ('group', group_name))
                 
                 for conn_name in filtered_connections:
-                    if conn_name in self.main_window.saved_connections:
+                    if conn_name in self.main_window.state_manager.saved_connections:
                         conn_item = QTreeWidgetItem(group_item, [conn_name])
                         conn_item.setData(0, Qt.ItemDataRole.UserRole, ('connection', conn_name))
                         
                         # 如果是当前连接，加载数据库对象
-                        if conn_name == self.main_window.current_connection and hasattr(self.main_window, 'db_connection') and self.main_window.db_connection:
+                        if conn_name == self.main_window.state_manager.current_connection and self.main_window.state_manager.db_connection:
                             self._load_databases_to_connection_tree(conn_item)
         
         # 添加未分组的连接
-        for conn_name, conn_data in self.main_window.saved_connections.items():
+        for conn_name, conn_data in self.main_window.state_manager.saved_connections.items():
             # 检查是否已在组中
             in_group = False
-            for group_name, connections in self.main_window.connection_groups.items():
+            for group_name, connections in self.main_window.state_manager.connection_groups.items():
                 if conn_name in connections:
                     in_group = True
                     break
             
-            if not in_group and (not show_only_current or conn_name == self.main_window.current_connection):
-                conn_item = QTreeWidgetItem(self.main_window.connection_tree, [conn_name])
+            if not in_group and (not show_only_current or conn_name == self.main_window.state_manager.current_connection):
+                conn_item = QTreeWidgetItem(tree, [conn_name])
                 conn_item.setData(0, Qt.ItemDataRole.UserRole, ('connection', conn_name))
                 
                 # 如果是当前连接，加载数据库对象
-                if conn_name == self.main_window.current_connection and hasattr(self.main_window, 'db_connection') and self.main_window.db_connection:
+                if conn_name == self.main_window.state_manager.current_connection and self.main_window.state_manager.db_connection:
                     self._load_databases_to_connection_tree(conn_item)
         
         # 展开所有节点
@@ -198,18 +235,19 @@ class ConnectionManager:
                 child.setExpanded(True)
                 expand_all_children(child)
         
-        expand_all_items(self.main_window.connection_tree)
+        expand_all_items(tree)
     
     def _load_databases_to_connection_tree(self, conn_item):
         """
         加载数据库到连接树
         """
-        if not hasattr(self.main_window, 'db_connection') or not self.main_window.db_connection:
+        state = self.main_window.state_manager
+        if not state.db_connection:
             return
         
         try:
-            with self.main_window.db_connection.cursor() as cursor:
-                if self.main_window.current_db_type == 'MySQL':
+            with state.db_connection.cursor() as cursor:
+                if state.current_db_type == 'MySQL':
                     # 显示所有数据库
                     cursor.execute("SHOW DATABASES")
                     databases = cursor.fetchall()
@@ -222,7 +260,7 @@ class ConnectionManager:
                         db_item.setData(0, Qt.ItemDataRole.UserRole, ('database', db_name))
                         
                         # 如果是当前数据库，加载表
-                        if db_name == self.main_window.current_db:
+                        if db_name == state.current_db:
                             try:
                                 cursor.execute(f"USE {db_name}")
                                 cursor.execute("SHOW TABLES")
@@ -240,7 +278,7 @@ class ConnectionManager:
                                 tables_item.setExpanded(True)
                             except Exception as e:
                                 self.logger.log('WARNING', f"加载表失败: {e}")
-                elif self.main_window.current_db_type == 'PostgreSQL':
+                elif state.current_db_type == 'PostgreSQL':
                     # PostgreSQL显示所有数据库
                     cursor.execute("SELECT datname FROM pg_database WHERE datistemplate = false")
                     databases = cursor.fetchall()
@@ -249,7 +287,7 @@ class ConnectionManager:
                         db_name = db[0]
                         db_item = QTreeWidgetItem(conn_item, [db_name])
                         db_item.setData(0, Qt.ItemDataRole.UserRole, ('database', db_name))
-                elif self.main_window.current_db_type == 'SQL Server':
+                elif state.current_db_type == 'SQL Server':
                     # SQL Server显示所有数据库
                     cursor.execute("SELECT name FROM sys.databases")
                     databases = cursor.fetchall()
@@ -268,7 +306,7 @@ class ConnectionManager:
         dialog = ConnectionDialog(self.main_window)
         if dialog.exec():
             conn_data = dialog.result
-            self.main_window.saved_connections[conn_data['name']] = conn_data
+            self.main_window.state_manager.add_connection(conn_data['name'], conn_data)
             self.load_connections_to_tree()
             self.save_connections()
             self.logger.log('INFO', f"新建连接: {conn_data['name']}")
@@ -278,7 +316,7 @@ class ConnectionManager:
         编辑连接
         """
         # 获取当前选中的连接
-        selected_items = self.main_window.connection_tree.selectedItems()
+        selected_items = self.main_window.left_panel.connection_tree.selectedItems()
         if not selected_items:
             QMessageBox.warning(self.main_window, "编辑连接", "请先选择一个连接")
             return
@@ -287,20 +325,12 @@ class ConnectionManager:
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if data and data[0] == 'connection':
             conn_name = data[1]
-            conn_data = self.main_window.saved_connections.get(conn_name)
+            conn_data = self.main_window.state_manager.saved_connections.get(conn_name)
             if conn_data:
                 dialog = ConnectionDialog(self.main_window, conn_data)
                 if dialog.exec():
                     new_conn_data = dialog.result
-                    # 如果连接名称改变，需要更新字典键
-                    if new_conn_data['name'] != conn_name:
-                        del self.main_window.saved_connections[conn_name]
-                        # 同时从连接组中移除旧名称
-                        for group_name, connections in self.main_window.connection_groups.items():
-                            if conn_name in connections:
-                                connections.remove(conn_name)
-                                connections.append(new_conn_data['name'])
-                    self.main_window.saved_connections[new_conn_data['name']] = new_conn_data
+                    self.main_window.state_manager.update_connection(conn_name, new_conn_data)
                     self.load_connections_to_tree()
                     self.save_connections()
                     self.logger.log('INFO', f"编辑连接: {new_conn_data['name']}")
@@ -310,7 +340,7 @@ class ConnectionManager:
         删除连接
         """
         # 获取当前选中的连接
-        selected_items = self.main_window.connection_tree.selectedItems()
+        selected_items = self.main_window.left_panel.connection_tree.selectedItems()
         if not selected_items:
             QMessageBox.warning(self.main_window, "删除连接", "请先选择一个连接")
             return
@@ -321,13 +351,7 @@ class ConnectionManager:
             conn_name = data[1]
             if QMessageBox.question(self.main_window, "删除连接", f"确定要删除连接 '{conn_name}' 吗？", 
                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-                # 从连接组中移除
-                for group_name, connections in self.main_window.connection_groups.items():
-                    if conn_name in connections:
-                        connections.remove(conn_name)
-                # 从保存的连接中删除
-                if conn_name in self.main_window.saved_connections:
-                    del self.main_window.saved_connections[conn_name]
+                self.main_window.state_manager.remove_connection(conn_name)
                 self.load_connections_to_tree()
                 self.save_connections()
                 self.logger.log('INFO', f"删除连接: {conn_name}")
@@ -338,8 +362,8 @@ class ConnectionManager:
         """
         group_name, ok = QInputDialog.getText(self.main_window, "新建连接组", "请输入连接组名称:")
         if ok and group_name:
-            if group_name not in self.main_window.connection_groups:
-                self.main_window.connection_groups[group_name] = []
+            if group_name not in self.main_window.state_manager.connection_groups:
+                self.main_window.state_manager.add_connection_group(group_name)
                 self.load_connections_to_tree()
                 self.save_connections()
                 self.logger.log('INFO', f"新建连接组: {group_name}")
@@ -348,39 +372,46 @@ class ConnectionManager:
         """
         连接到数据库
         """
-        conn_data = self.main_window.saved_connections.get(conn_name)
+        conn_data = self.main_window.state_manager.saved_connections.get(conn_name)
         if conn_data:
             try:
                 # 从连接池获取连接
-                self.main_window.db_connection = self.main_window.connection_pool.get_connection(conn_name, conn_data)
+                db_connection = self.main_window.connection_pool.get_connection(conn_name, conn_data)
                 
-                if not self.main_window.db_connection:
+                if not db_connection:
                     QMessageBox.warning(self.main_window, "连接失败", f"未支持的数据库类型或驱动未安装: {conn_data['type']}")
                     return
                 
                 # 连接成功
-                self.main_window.current_connection = conn_name
-                self.main_window.current_db_type = conn_data['type']
-                self.main_window.current_db = conn_data['database'] if conn_data['database'] else ''
+                self.main_window.state_manager.set_connection(conn_name, db_connection, conn_data['type'])
+                if conn_data['database']:
+                    self.main_window.state_manager.set_database(conn_data['database'])
+                
                 self.main_window.connection_status.setText(f"已连接: {conn_name} ({conn_data['type']})")
                 self.main_window.status_info.setText("已连接")
                 self.logger.log('INFO', f"连接到数据库: {conn_name}")
                 
-                # 加载实际的数据库对象
-                self.main_window.load_database_objects()
+                # 加载实际的数据库对象到连接树
+                self.main_window.left_panel.load_connections_to_tree(show_only_current=False)
+                
+                # 恢复数据库上下文（因为 load_connections_to_tree 会改变当前数据库）
+                state = self.main_window.state_manager
+                if state.current_db and state.current_db_type in ('MySQL', 'MariaDB'):
+                    try:
+                        with state.db_connection.cursor() as cursor:
+                            cursor.execute(f"USE `{state.current_db}`")
+                    except Exception:
+                        pass
                 
                 # 获取表名和列名用于自动补全
                 from core.database_operations import get_database_objects_for_completion
-                tables, columns = get_database_objects_for_completion(self.main_window.db_connection, self.main_window.current_db_type, self.main_window.current_db)
+                tables, columns = get_database_objects_for_completion(state.db_connection, state.current_db_type, state.current_db)
                 
                 # 更新所有SQL编辑器的补全列表
                 self.main_window.update_all_sql_editors_completion(tables, columns)
                 
                 # 显示所有连接，保持连接列表完整
                 self.load_connections_to_tree(show_only_current=False)
-                
-                # 切换到对象标签页
-                self.main_window.left_tab_widget.setCurrentIndex(1)
                 
                 # 更新查询标签页的连接信息
                 self.main_window.update_query_tab_info()
