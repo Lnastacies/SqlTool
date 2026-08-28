@@ -1,148 +1,80 @@
-# SQL Tool - 数据库管理工具
+# SQLTool
 
-一个类似Navicat的开源数据库管理工具，支持MySQL、PostgreSQL、SQL Server和SQLite，可在Windows 11上运行。
+SQLTool 是一款基于 Electron、React 和 TypeScript 的桌面数据库管理工具，支持
+MySQL、PostgreSQL、SQL Server 和 SQLite。
 
-## 功能特性
+## 主要功能
 
-### 1. 多数据库支持
-- MySQL
-- PostgreSQL
-- SQL Server
-- SQLite
+- 数据库连接、分组及连接状态管理
+- 数据库、表、视图、函数、事件等对象浏览
+- SQL 编辑、执行、分页结果及查询历史
+- 表结构设计、数据编辑和结构同步
+- 数据导入、导出及跨库传输
+- 数据库备份、恢复和常用管理工具
+- 本地日志记录与关键操作追踪
 
-### 2. 数据库连接管理
-- 新建数据库连接
-- 保存连接配置
-- 快速加载已保存的连接
+## 环境要求
 
-### 3. SQL编辑器
-- 语法高亮（待实现）
-- SQL语句执行
-- 结果显示
-- 清空编辑器
+- Windows 10/11
+- Node.js 18 或更高版本
+- Yarn 1.x 或 npm
+- SQL Server 连接需安装可用的 SQL Server 服务及网络访问环境
 
-### 4. 数据管理
-- 表数据查询
-- 结果导出（CSV、JSON）
+## 安装与运行
 
-### 5. 数据库对象管理
-- 表查看
-- （待实现：视图、存储过程、函数等）
+安装依赖：
 
-### 6. 界面设计
-- 类似Navicat的界面布局
-- 顶部菜单栏（文件、编辑、查看、收藏夹、工具、窗口、帮助）
-- 工具栏（连接、新建查询、表、视图、函数等）
-- 左侧面板（连接管理器、对象浏览器）
-- 中央工作区（SQL编辑器、结果显示）
-
-## 安装说明
-
-### 环境要求
-- Windows 11
-- Python 3.8 或更高版本
-
-### 安装步骤
-
-1. **安装Python依赖**
 ```bash
-pip install -r requirements.txt
+yarn install
 ```
 
-2. **安装数据库驱动（如果需要）**
-- MySQL：已包含在依赖中
-- PostgreSQL：已包含在依赖中
-- SQL Server：需要安装ODBC驱动
-  - 下载地址：https://learn.microsoft.com/zh-cn/sql/connect/odbc/download-odbc-driver-for-sql-server?view=sql-server-ver16
-- SQLite：Python标准库已包含
+构建并启动：
 
-3. **运行程序**
 ```bash
-python SqlTool.py
+yarn build
+yarn start
 ```
 
-## 使用说明
+开发模式需要分别启动编译服务和 Electron：
 
-### 1. 连接数据库
+```powershell
+# 终端 1
+yarn dev
 
-1. 在左侧面板选择数据库类型
-2. 填写连接信息
-   - MySQL/PostgreSQL/SQL Server：主机、端口、数据库名、用户名、密码
-   - SQLite：选择SQLite文件路径
-3. 点击"连接"按钮
+# 终端 2
+$env:NODE_ENV = 'development'
+yarn start
+```
 
-### 2. 执行SQL语句
+## 常用命令
 
-1. 在SQL编辑器标签页中输入SQL语句
-2. 点击"执行SQL"按钮
-3. 在结果标签页中查看执行结果
-
-### 3. 保存连接
-
-1. 填写连接信息
-2. 点击"保存连接"按钮
-3. 保存的连接会显示在"已保存连接"列表中
-
-### 4. 导出结果
-
-1. 执行查询获取结果
-2. 在结果标签页点击"导出结果"按钮
-3. 选择导出格式（CSV或JSON）和保存路径
+```bash
+yarn build
+yarn verify:production
+yarn test:connection-lifecycle
+yarn test:database-backup
+yarn test:table-features
+yarn test:database-tools
+yarn package
+```
 
 ## 项目结构
 
-```
+```text
 SqlTool/
-├── core/                # 核心功能模块
-│   ├── connection_manager.py     # 连接管理器
-│   ├── connection_pool.py        # 连接池
-│   ├── database_operations.py    # 数据库操作
-│   ├── metadata_fetcher.py       # 元数据获取
-│   ├── sql_executor.py           # SQL执行器
-│   └── sync_engine.py            # 同步引擎
-├── ui/                  # 界面模块
-│   ├── components/      # 界面组件
-│   │   ├── menu_toolbar.py       # 菜单和工具栏
-│   │   ├── connection_manager.py # 连接管理界面
-│   │   ├── sql_editor.py         # SQL编辑器
-│   │   └── ...
-│   ├── connection_dialog.py      # 连接对话框
-│   ├── import_export_wizard.py   # 导入导出向导
-│   └── main_window.py            # 主窗口
-├── utils/               # 工具模块
-│   ├── common_utils.py           # 通用工具
-│   └── logger.py                 # 日志工具
-├── .gitignore
-├── README.md
-├── SqlTool.py          # 主入口文件
-├── build.py            # 构建脚本
-└── requirements.txt    # 依赖文件
+|-- src/
+|   |-- main/                 Electron 主进程、IPC 和数据库服务
+|   `-- renderer/             React 界面、功能模块和样式
+|-- scripts/                  构建校验与自动化测试脚本
+|-- resources/                应用图标等打包资源
+|-- index.html                渲染进程入口
+|-- package.json              依赖、命令和打包配置
+|-- tsconfig.json             TypeScript 配置
+`-- vite.config.js            Vite 构建配置
 ```
 
-## 开发计划
+## 本地数据与日志
 
-- [x] 基本框架搭建
-- [x] 数据库连接功能
-- [x] SQL编辑器和执行
-- [x] 结果显示和导出
-- [x] 顶部菜单栏实现
-- [x] 工具栏实现
-- [ ] 语法高亮
-- [ ] 表结构编辑
-- [ ] 数据导入功能
-- [ ] 视图、存储过程管理
-- [ ] 数据同步功能
-- [ ] 数据备份和恢复
-
-## 技术栈
-
-- **界面框架**：PyQt6
-- **数据库驱动**：
-  - MySQL：mysql-connector-python
-  - PostgreSQL：psycopg2-binary
-  - SQL Server：pyodbc
-  - SQLite：sqlite3（Python标准库）
-
-## 许可证
-
-MIT License
+连接配置、查询历史等运行数据保存在 Electron 用户数据目录。应用日志默认写入项目
+`logs/` 目录，并按日期生成 `sqltool_YYYYMMDD.log`，关键连接、查询、备份及数据变更
+操作均可通过该日志追踪。

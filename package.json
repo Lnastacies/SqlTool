@@ -1,0 +1,96 @@
+{
+  "name": "sqltool",
+  "version": "1.0.0",
+  "description": "数据库管理工具，支持 MySQL、PostgreSQL、SQL Server、SQLite等数据库",
+  "author": {
+    "company": "北京先进数通信息技术股份公司",
+    "name": "木木木主",
+    "email": "1656113@163.com"
+  },
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:main\" \"npm run dev:renderer\"",
+    "dev:main": "tsc -p src/main/tsconfig.json --watch",
+    "dev:renderer": "vite",
+    "clean:dist": "node scripts/cleanProductionBuild.cjs",
+    "clean:renderer": "node scripts/cleanRendererBuild.cjs",
+    "build": "npm run clean:dist && npm run build:main && npm run build:renderer && npm run verify:production",
+    "build:main": "tsc -p src/main/tsconfig.json",
+    "build:renderer": "npm run clean:renderer && node node_modules/vite/dist/node/cli.js build",
+    "verify:production": "node scripts/verifyProductionBuild.cjs",
+    "test:connection-config": "npm run build:main && node scripts/testConnectionConfig.cjs",
+    "test:connection-lifecycle": "npm run build:main && node scripts/testConnectionLifecycle.cjs",
+    "test:connection-menu": "node scripts/testConnectionContextMenu.cjs",
+    "test:connection-overview-ui": "node scripts/testConnectionDatabaseOverviewUi.cjs",
+    "test:database-close-ui": "node scripts/testDatabaseCloseUi.cjs",
+    "test:database-creation": "npm run build && node scripts/testDatabaseCreation.cjs && node scripts/testDatabaseEncodingCatalog.cjs",
+    "test:database-menu": "npm run build:main && node scripts/testDatabaseContextMenu.cjs && node scripts/testDatabaseManagement.cjs",
+    "test:database-object-menu": "node scripts/testDatabaseObjectCategoryMenu.cjs && node scripts/testDatabaseObjectCategoryActions.cjs && node scripts/testTableObjectContextMenu.cjs",
+    "test:database-object-menu-ui": "node scripts/testDatabaseObjectCategoryMenuUi.cjs",
+    "test:table-transfer-ui": "node scripts/testTableTransferWizardUi.cjs",
+    "test:database-objects": "npm run build:main && node scripts/testDatabaseObjectMetadata.cjs",
+    "test:database-backup": "npm run build:main && node scripts/testDatabaseBackupNaming.cjs && node scripts/testDatabaseBackupParser.cjs && node scripts/testDatabaseBackupObjects.cjs && node scripts/testDatabaseBackupSqlGeneration.cjs && node scripts/testDatabaseBackupLifecycle.cjs && node scripts/testDatabaseBackupFailure.cjs",
+    "test:database-backup-ui": "node scripts/testDatabaseBackupUi.cjs",
+    "test:table-features": "npm run build:main && node scripts/testTableFeatures.cjs && node scripts/testTableTransferFormats.cjs && node scripts/testTableTransferModel.cjs && node scripts/testTableDataTypes.cjs && node scripts/testTableDesignerSubmitLog.cjs",
+    "test:database-tools": "npm run build:main && node scripts/testDatabaseTools.cjs && node scripts/testDatabaseToolExecution.cjs && node scripts/testStructureSyncExecution.cjs && node scripts/testStructureSyncSafety.cjs",
+    "package": "npm run build && electron-builder",
+    "package:dev": "npm run build && electron-builder --dir",
+    "prestart": "node scripts/ensureElectronRuntime.cjs",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.6.0",
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.42",
+    "@types/react-dom": "^18.2.17",
+    "antd": "^5.12.0",
+    "electron-squirrel-startup": "^1.0.0",
+    "exceljs": "^4.4.0",
+    "fast-xml-parser": "^5.11.0",
+    "monaco-editor": "0.55.1",
+    "mysql2": "^3.6.5",
+    "pg": "^8.11.3",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "sql.js": "^1.14.0",
+    "tedious": "^16.6.0",
+    "tslib": "^2.6.2"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.10.9",
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "less": "^4.2.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.8"
+  },
+  "build": {
+    "appId": "com.sqltool.app",
+    "productName": "SQLTool",
+    "directories": {
+      "output": "out"
+    },
+    "files": [
+      "dist/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": true
+    }
+  }
+}

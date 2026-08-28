@@ -1,0 +1,260 @@
+.database-tool-modal {
+  .ant-modal-content {
+    overflow: hidden;
+    border: 1px solid #cfd8e3;
+    border-radius: 8px;
+    box-shadow: 0 18px 48px rgba(29, 45, 66, 0.2);
+  }
+
+  .ant-modal-header {
+    margin: -20px -24px 18px;
+    padding: 14px 20px;
+    background:
+      linear-gradient(90deg, rgba(22, 132, 216, 0.09), transparent 56%),
+      #f8fafc;
+    border-bottom: 1px solid #dfe6ee;
+  }
+
+  .ant-modal-body {
+    min-height: 545px;
+  }
+
+  .ant-steps {
+    max-width: 760px;
+    margin: 0 auto 18px;
+  }
+}
+
+.database-tool-title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+
+  > span {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    color: #ffffff;
+    font-size: 19px;
+    background: #1684d8;
+    border-radius: 5px;
+    box-shadow: 0 5px 12px rgba(22, 132, 216, 0.22);
+  }
+
+  > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  strong {
+    color: #1f2d3d;
+    font-size: 15px;
+  }
+
+  small {
+    color: #718096;
+    font-size: 11px;
+    font-weight: 400;
+  }
+}
+
+.database-tool-endpoints {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  margin-top: 32px;
+}
+
+.database-tool-endpoint {
+  position: relative;
+  min-height: 270px;
+  padding: 20px;
+  background: #fbfcfe;
+  border: 1px solid #dce3eb;
+  border-top: 3px solid #31a6b8;
+  border-radius: 6px;
+
+  &--target {
+    border-top-color: #1684d8;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 17px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #e3e8ef;
+  }
+
+  header > div {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  header strong {
+    color: #233044;
+    font-size: 14px;
+  }
+
+  header small {
+    margin-top: 2px;
+    color: #7c8797;
+    font-size: 11px;
+  }
+
+  label {
+    display: grid;
+    grid-template-columns: 62px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    margin: 14px 0;
+    color: #5f6b7a;
+    font-size: 12px;
+  }
+
+  .ant-select {
+    width: 100%;
+  }
+}
+
+.database-tool-endpoint__icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: #187c91;
+  background: #e3f4f7;
+  border-radius: 5px;
+}
+
+.database-tool-endpoint--target .database-tool-endpoint__icon {
+  color: #176fae;
+  background: #e5f1fb;
+}
+
+.database-tool-swap {
+  color: #2f7fae;
+  border-color: #b9cfdf;
+  box-shadow: 0 4px 10px rgba(39, 92, 125, 0.12);
+}
+
+.database-tool-route {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 7px 12px;
+  margin-bottom: 12px;
+  color: #405064;
+  font-size: 12px;
+  background: #f7f9fc;
+  border: 1px solid #e0e6ed;
+  border-radius: 4px;
+}
+
+.database-tool-options {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background: #f7f9fb;
+  border: 1px solid #e0e5eb;
+  border-radius: 4px;
+}
+
+.database-tool-options__label {
+  color: #344255;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.database-tool-options__note {
+  color: #5b6878;
+  font-size: 12px;
+}
+
+.database-tool-tablebar {
+  display: grid;
+  grid-template-columns: minmax(200px, 320px) 1fr auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 9px;
+  color: #657184;
+  font-size: 11px;
+}
+
+.database-tool-tables .ant-table-wrapper,
+.database-tool-preview .ant-table-wrapper {
+  border: 1px solid #dde4eb;
+  border-radius: 4px;
+}
+
+.database-tool-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.database-tool-preview__warning {
+  color: #a65e00;
+  font-size: 11px;
+}
+
+.database-tool-preview__muted {
+  color: #a0a8b2;
+}
+
+.database-tool-preview__sql {
+  max-height: 210px;
+  padding: 12px;
+  margin: 0;
+  overflow: auto;
+  color: #d8e2ee;
+  font: 11px/1.65 Consolas, monospace;
+  white-space: pre-wrap;
+  background: #202832;
+  border: 1px solid #151c24;
+  border-radius: 4px;
+}
+
+.database-tool-result {
+  max-width: 780px;
+  margin: 0 auto;
+
+  .ant-result {
+    padding: 26px 20px 20px;
+  }
+
+  .ant-result-icon {
+    margin-bottom: 14px;
+  }
+
+  .ant-result-icon .anticon {
+    color: #2f9b68;
+  }
+
+  .ant-descriptions {
+    margin-bottom: 14px;
+  }
+
+  .ant-alert-description {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .database-tool-modal {
+    width: calc(100vw - 32px) !important;
+  }
+}
