@@ -17,16 +17,14 @@ import type {
   CreateDatabaseBackupResult,
   DatabaseBackupProgressReporter,
 } from './databaseBackupTypes'
+import type {
+  DatabaseDumpTableSource,
+} from './databaseDumpService'
 import { writeDatabaseDumpToPath } from './databaseDumpService'
 import type {
   DatabaseModel,
   DatabaseModelTable,
 } from './databaseManagementTypes'
-
-interface BackupPage {
-  rows: Record<string, unknown>[]
-  total: number
-}
 
 export interface CreateBackupContext {
   connectionId: string
@@ -34,11 +32,9 @@ export interface CreateBackupContext {
   active: ActiveConnection
   model: DatabaseModel
   request: CreateDatabaseBackupRequest
-  loadPage: (
+  openTable: (
     table: DatabaseModelTable,
-    page: number,
-    pageSize: number,
-  ) => Promise<BackupPage>
+  ) => Promise<DatabaseDumpTableSource>
 }
 
 export async function createDatabaseBackup(
@@ -87,7 +83,7 @@ export async function createDatabaseBackup(
     const dump = await writeDatabaseDumpToPath(
       model,
       request.mode,
-      { loadPage: context.loadPage },
+      { openTable: context.openTable },
       rawPath,
       {
         ...request.options,

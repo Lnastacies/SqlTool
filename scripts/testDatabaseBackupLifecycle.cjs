@@ -83,13 +83,21 @@ async function testCreateVerifyAndDelete(tempDirectory) {
         stripDefiners: true,
       },
     },
-    loadPage: async () => ({
-      total: 2,
-      rows: [
+    openTable: async () => {
+      const rows = [
         { id: 1, name: 'Alpha' },
         { id: 2, name: '中文数据' },
-      ],
-    }),
+      ]
+      let sent = false
+      return {
+        total: rows.length,
+        readNext: async () => {
+          if (sent) return []
+          sent = true
+          return rows
+        },
+      }
+    },
   }, event => progress.push(event))
 
   assert.equal(result.record.compressed, true)

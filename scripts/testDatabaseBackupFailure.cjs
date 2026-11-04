@@ -60,7 +60,7 @@ function createMySqlContext(executeSQL) {
         stripDefiners: true,
       },
     },
-    loadPage: async () => {
+    openTable: async () => {
       throw new Error('服务断连后不应继续读取表数据')
     },
   }
@@ -131,7 +131,7 @@ async function main() {
     })
     midstreamContext.request.operationId = 'midstream-disconnect-test'
     midstreamContext.request.mode = 'data'
-    midstreamContext.loadPage = async () => {
+    midstreamContext.openTable = async () => {
       throw new Error('读取表数据失败: read ECONNRESET')
     }
     const midstreamProgress = []

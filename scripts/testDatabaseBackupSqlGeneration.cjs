@@ -36,12 +36,20 @@ async function createDump(tempDirectory, model, objectDdls = []) {
     model,
     'structure-data',
     {
-      loadPage: async table => ({
-        total: 1,
-        rows: table.name === 'account'
+      openTable: async table => {
+        const rows = table.name === 'account'
           ? [{ id: 1, name: '主账号' }]
-          : [{ id: 10, account_id: 1 }],
-      }),
+          : [{ id: 10, account_id: 1 }]
+        let sent = false
+        return {
+          total: rows.length,
+          readNext: async () => {
+            if (sent) return []
+            sent = true
+            return rows
+          },
+        }
+      },
     },
     outputPath,
     {

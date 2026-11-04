@@ -40,6 +40,7 @@ import type {
 } from './databaseManagementTypes'
 import { loadDatabaseEncodingCatalog } from './databaseEncodingCatalog'
 import { writeDatabaseDumpFile } from './databaseDumpService'
+import { createBackupTableReader } from './databaseBackupTableReader'
 import { loadDatabaseModel } from './databaseModelService'
 import { DatabaseBackupService } from './databaseBackupService'
 import type {
@@ -663,17 +664,13 @@ export class ConnectionManager {
     )
     try {
       const model = await this.getDatabaseModel(connId, database)
+      const active = await this.resolveActiveConnection(connId, database)
       const result = await writeDatabaseDumpFile(model, mode, {
-        loadPage: async (table, page, pageSize) => {
-          const pageResult = await this.getTableData(
-            connId,
-            database,
-            table.name,
-            page,
-            pageSize,
-          )
-          return { rows: pageResult.rows, total: pageResult.total }
-        },
+        openTable: table => createBackupTableReader(
+          active,
+          database,
+          table,
+        ),
       })
       logger.info(
         'ConnectionManager',
@@ -713,16 +710,11 @@ export class ConnectionManager {
       active,
       model,
       request,
-      loadPage: async (table, page, pageSize) => {
-        const result = await this.getTableData(
-          connId,
-          database,
-          table.name,
-          page,
-          pageSize,
-        )
-        return { rows: result.rows, total: result.total }
-      },
+      openTable: table => createBackupTableReader(
+        active,
+        database,
+        table,
+      ),
     }, report)
   }
 
