@@ -9,10 +9,7 @@ import {
 } from './adapters'
 import { TDSQLMetadataService } from './tdsql/tdsqlMetadataService'
 import { TDSQLMonitorService } from './tdsql/tdsqlMonitorService'
-import type {
-  TDSQLDatabaseOverview,
-  TDSQLTableMetadata,
-} from './tdsql/tdsqlMetadataTypes'
+import type { TDSQLTableMetadata } from './tdsql/tdsqlMetadataTypes'
 import * as fs from 'fs'
 import * as path from 'path'
 import { logger } from '../logger'
@@ -2266,16 +2263,6 @@ export class ConnectionManager {
     const active = this.resolveTDSQLConnection(connId)
     const service = new TDSQLMetadataService(active.adapter, active.connection)
     return service.getTableMetadata(database, tableName)
-  }
-
-  /** 查询 TDSQL 数据库的分布式概览 */
-  async getTDSQLDatabaseOverview(
-    connId: string,
-    database: string,
-  ): Promise<TDSQLDatabaseOverview> {
-    const active = this.resolveTDSQLConnection(connId)
-    const service = new TDSQLMetadataService(active.adapter, active.connection)
-    return service.getDatabaseOverview(database)
   }
 
   /** 查询 TDSQL 会话列表（含扩展字段） */

@@ -492,32 +492,6 @@ declare global {
           tableSchema: string
         }>
       }>>
-      getDatabaseOverview: (
-        connId: string,
-        database: string,
-      ) => Promise<IPCResponse<{
-        database: string
-        shardedCount: number
-        noshardCount: number
-        broadcastCount: number
-        unknownCount: number
-        tables: Array<{
-          tableName: string
-          tableType: string
-          shardKey: { fieldName: string; source: string } | null
-          engine: string
-          partitions: Array<{
-            partitionName: string
-            subpartitionName: string | null
-            partitionMethod: string | null
-            partitionExpression: string | null
-            tableRows: number
-            dataLength: number
-            indexLength: number
-            tableSchema: string
-          }>
-        }>
-      }>>
       getSessions: (connId: string) => Promise<IPCResponse<{
         id: number
         user: string

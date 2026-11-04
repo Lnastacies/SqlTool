@@ -21,7 +21,6 @@ import {
   buildShowCreateTableSql,
 } from './tdsqlMetadataSql'
 import type {
-  TDSQLDatabaseOverview,
   TDSQLPartitionInfo,
   TDSQLTableMetadata,
   TDSQLTableType,
@@ -142,37 +141,6 @@ export class TDSQLMetadataService {
     const result = await this.executeShowCreateTable(database, tableName)
     const ddl = extractDDLFromRow(result.rows?.[0])
     return parseTableTypeFromDDL(ddl)
-  }
-
-  /**
-   * 数据库级分布式概览
-   *
-   * 聚合统计数据库内各类型表的数量和元数据。
-   */
-  async getDatabaseOverview(
-    database: string,
-  ): Promise<TDSQLDatabaseOverview> {
-    logger.info(
-      'TDSQLMetadata',
-      `查询数据库概览: ${database}`,
-    )
-    const tableNames = await this.adapter.getTables(this.connection, database)
-    const tables = await Promise.all(
-      tableNames.map(name => this.getTableMetadata(database, name)),
-    )
-    const overview: TDSQLDatabaseOverview = {
-      database,
-      shardedCount: tables.filter(t => t.tableType === 'shard').length,
-      noshardCount: tables.filter(t => t.tableType === 'noshard').length,
-      broadcastCount: tables.filter(t => t.tableType === 'broadcast').length,
-      unknownCount: tables.filter(t => t.tableType === 'unknown').length,
-      tables,
-    }
-    logger.info(
-      'TDSQLMetadata',
-      `数据库概览完成: ${database}, 分表=${overview.shardedCount}, 单表=${overview.noshardCount}, 广播表=${overview.broadcastCount}`,
-    )
-    return overview
   }
 
   /** 从 DDL 解析存储引擎 */

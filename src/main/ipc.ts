@@ -96,7 +96,6 @@ export type IPCChannel =
   | 'logger:clearLogs'
   | 'logger:write'
   | 'tdsql:getTableMetadata'
-  | 'tdsql:getDatabaseOverview'
   | 'tdsql:getSessions'
   | 'tdsql:getDdlTasks'
 

@@ -455,8 +455,6 @@ contextBridge.exposeInMainWorld('logger', {
 contextBridge.exposeInMainWorld('tdsql', {
   getTableMetadata: (connId: string, database: string, tableName: string) =>
     ipcRenderer.invoke('tdsql:getTableMetadata', connId, database, tableName),
-  getDatabaseOverview: (connId: string, database: string) =>
-    ipcRenderer.invoke('tdsql:getDatabaseOverview', connId, database),
   getSessions: (connId: string) =>
     ipcRenderer.invoke('tdsql:getSessions', connId),
   getDdlTasks: (connId: string) =>

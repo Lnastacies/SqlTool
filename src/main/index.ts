@@ -856,11 +856,6 @@ app.whenReady().then(async () => {
     return connectionManager.getTDSQLTableMetadata(connId, database, tableName)
   })
 
-  registerIPC('tdsql:getDatabaseOverview', async (_event, connId, database) => {
-    logger.info('IPC', `TDSQL 查询数据库概览: 连接=${connId}, 数据库=${database}`)
-    return connectionManager.getTDSQLDatabaseOverview(connId, database)
-  })
-
   registerIPC('tdsql:getSessions', async (_event, connId) => {
     logger.info('IPC', `TDSQL 查询会话列表: 连接=${connId}`)
     return connectionManager.getTDSQLSessions(connId)
