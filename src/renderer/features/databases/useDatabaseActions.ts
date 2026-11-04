@@ -22,6 +22,7 @@ interface DatabaseActionsOptions {
   documents: WorkspaceDocument[]
   closeDocumentSafely: (documentId: string) => Promise<boolean>
   onDisconnect: (connection: ConnectionData) => Promise<void>
+  onConnectionInvalid: (connection: ConnectionData) => void
   onUnload: (context: DatabaseActionContext) => void
   onRenamed: (
     context: DatabaseActionContext,
@@ -61,12 +62,12 @@ export function useDatabaseActions(options: DatabaseActionsOptions) {
   }
 
   const closeDatabase = (context: DatabaseActionContext) => (
-    closeDatabaseContext(
-      context,
+    closeDatabaseContext(context, {
       closeDocuments,
-      options.onDisconnect,
-      options.onUnload,
-    )
+      onDisconnect: options.onDisconnect,
+      onUnload: options.onUnload,
+      onConnectionInvalid: options.onConnectionInvalid,
+    })
   )
 
   const saveEdit = async (request: AlterDatabaseRequest) => {

@@ -10,6 +10,7 @@ import {
 import * as fs from 'fs'
 import * as path from 'path'
 import { logger } from '../logger'
+import { isConnectionLostError } from '../errors'
 import { ConnectionConfigStore } from './connectionConfigStore'
 import {
   CreateDatabaseResult,
@@ -286,25 +287,79 @@ export class ConnectionManager {
     }
   }
 
+  /**
+   * 释放连接：无论底层驱动连接是否还能响应，都必须释放本地资源并移除注册项，
+   * 否则残留的僵尸连接会让后续所有操作持续报错（也无法再次关闭）。
+   */
+  private async evictConnection(connId: string, reason: string): Promise<void> {
+    const activeConn = this.connections.get(connId)
+    // 先摘除注册项，确保后续请求不会再复用这条失效连接
+    this.connections.delete(connId)
+    if (activeConn) {
+      try {
+        await this.querySessions.closeByConnection(connId)
+      } catch (error) {
+        logger.warn('ConnectionManager', `剔出失效连接时关闭查询会话异常: ID=${connId}, 原因=${(error as Error).message}`)
+      }
+      try {
+        await this.databaseConnections.close(connId)
+      } catch (error) {
+        logger.warn('ConnectionManager', `剔出失效连接时关闭数据库会话异常: ID=${connId}, 原因=${(error as Error).message}`)
+      }
+      try {
+        await activeConn.adapter.close(activeConn.connection)
+      } catch (error) {
+        // 底层连接已断开时 end/destroy 可能抛错，属预期情况，忽略即可
+        logger.warn('ConnectionManager', `剔出失效连接时释放底层连接异常(已忽略): ID=${connId}, 原因=${(error as Error).message}`)
+      }
+    }
+    logger.warn(
+      'ConnectionManager',
+      `已释放连接: ${activeConn?.connData.name || connId}, ID=${connId}, 类型=${activeConn?.connData.type || '未知'}, 原因=${reason}, 当前活跃连接数=${this.connections.size}`,
+    )
+  }
+
   async disconnect(connId: string): Promise<void> {
     const activeConn = this.connections.get(connId)
-    await this.querySessions.closeByConnection(connId)
-    await this.databaseConnections.close(connId)
-    if (activeConn) {
-      const connName = activeConn.connData.name
-      logger.info('ConnectionManager', `断开连接: ${connName}, ID: ${connId}`)
-      await activeConn.adapter.close(activeConn.connection)
-      this.connections.delete(connId)
-      logger.info('ConnectionManager', `连接已断开: ${connName}, 当前活跃连接数: ${this.connections.size}`)
-    } else {
+    if (!activeConn) {
       logger.warn('ConnectionManager', `断开连接失败: 连接ID ${connId} 不存在`)
+      return
     }
+    logger.info('ConnectionManager', `断开连接: ${activeConn.connData.name}, ID: ${connId}`)
+    // 关闭是尽力而为操作：即使底层驱动在已断开的连接上抛错，也必须完成本地清理并视为成功，
+    // 否则用户会看到“关闭失败: 不能再已断开的连接执行命令”。
+    try {
+      await this.evictConnection(connId, '用户主动断开连接')
+    } catch (error) {
+      this.connections.delete(connId)
+      logger.warn(
+        'ConnectionManager',
+        `断开连接清理异常(已忽略，连接仍视为已关闭): ID=${connId}, 原因=${(error as Error)?.message || String(error)}`,
+      )
+    }
+    logger.info('ConnectionManager', `连接已断开: ${activeConn.connData.name}, 当前活跃连接数: ${this.connections.size}`)
   }
 
   async getDatabases(connId: string): Promise<string[]> {
     const activeConn = this.connections.get(connId)
     if (!activeConn) throw new Error('连接不存在')
-    return await activeConn.adapter.getDatabases(activeConn.connection)
+    try {
+      return await activeConn.adapter.getDatabases(activeConn.connection)
+    } catch (error) {
+      await this.evictOnConnectionLost(connId, '读取数据库列表', error)
+      throw error
+    }
+  }
+
+  /** 读到连接已失效的错误时顺带把僵尸连接剔出，避免其继续阻塞后续操作 */
+  private async evictOnConnectionLost(
+    connId: string,
+    action: string,
+    error: unknown,
+  ): Promise<boolean> {
+    if (!isConnectionLostError(error)) return false
+    await this.evictConnection(connId, `${action}时检测到连接已失效`)
+    return true
   }
 
   async getDatabaseSummaries(connId: string): Promise<DatabaseSummary[]> {
@@ -335,6 +390,7 @@ export class ConnectionManager {
         `数据库摘要读取失败: 连接=${connId}, 耗时=${Date.now() - startedAt}ms`,
         error instanceof Error ? error : undefined,
       )
+      await this.evictOnConnectionLost(connId, '读取数据库摘要', error)
       throw error
     }
   }
@@ -418,9 +474,46 @@ export class ConnectionManager {
       `开始关闭数据库上下文: 连接=${connId}, 数据库=${database}`,
     )
     try {
-      await this.requireExistingDatabase(connId, database)
-      await this.querySessions.closeByDatabase(connId, database)
-      await this.databaseConnections.closeDatabase(connId, database)
+      const baseConnection = this.connections.get(connId)
+      if (!baseConnection) throw new Error('连接不存在或尚未连接')
+
+      // 远端存在性校验需要真实连接，但“关闭数据库”本质是本地会话清理；
+      // 连接已失效时不允许它阻塞关闭流程，只登记失效、随后统一剔除。
+      const accessible = await this.verifyDatabaseAccessible(
+        baseConnection,
+        database,
+      )
+      // 本地资源清理同样是尽力而为：连接已失效时，关闭会话内部可能抛断连错误，
+      // 不能让它中断“关闭数据库”这个本地操作。
+      try {
+        await this.querySessions.closeByDatabase(connId, database)
+      } catch (error) {
+        logger.warn(
+          'ConnectionManager',
+          `关闭数据库时清理查询会话异常(已忽略): 连接=${connId}, 数据库=${database}, 原因=${(error as Error)?.message || String(error)}`,
+        )
+      }
+      try {
+        await this.databaseConnections.closeDatabase(connId, database)
+      } catch (error) {
+        logger.warn(
+          'ConnectionManager',
+          `关闭数据库时清理数据会话异常(已忽略): 连接=${connId}, 数据库=${database}, 原因=${(error as Error)?.message || String(error)}`,
+        )
+      }
+
+      if (accessible === 'invalid') {
+        await this.evictConnection(
+          connId,
+          `关闭数据库时检测到连接已失效(数据库=${database})`,
+        )
+        logger.warn(
+          'ConnectionManager',
+          `连接已失效，已退化为本地清理并剔除连接: 连接=${connId}, 数据库=${database}, 耗时=${Date.now() - startedAt}ms`,
+        )
+        return { name: database, connectionInvalidated: true }
+      }
+
       logger.info(
         'ConnectionManager',
         `数据库上下文已关闭: 连接=${connId}, 数据库=${database}, 耗时=${Date.now() - startedAt}ms`,
@@ -432,6 +525,28 @@ export class ConnectionManager {
         `关闭数据库上下文失败: 连接=${connId}, 数据库=${database}, 耗时=${Date.now() - startedAt}ms`,
         error instanceof Error ? error : undefined,
       )
+      throw error
+    }
+  }
+
+  /**
+   * 校验数据库在服务端确实存在。
+   * 连接已失效时返回 'invalid' 而不是抛错，让调用方决定是继续本地清理还是中断。
+   */
+  private async verifyDatabaseAccessible(
+    baseConnection: ActiveConnection,
+    database: string,
+  ): Promise<'ok' | 'invalid'> {
+    try {
+      const databases = await baseConnection.adapter.getDatabases(
+        baseConnection.connection,
+      )
+      if (!databases.includes(database)) {
+        throw new Error(`数据库不存在或当前账号不可访问: ${database}`)
+      }
+      return 'ok'
+    } catch (error) {
+      if (isConnectionLostError(error)) return 'invalid'
       throw error
     }
   }
@@ -1980,9 +2095,16 @@ export class ConnectionManager {
   ): Promise<ActiveConnection> {
     const baseConnection = this.connections.get(connId)
     if (!baseConnection) throw new Error('连接不存在或尚未连接')
-    const databases = await baseConnection.adapter.getDatabases(
-      baseConnection.connection,
-    )
+    let databases: string[]
+    try {
+      databases = await baseConnection.adapter.getDatabases(
+        baseConnection.connection,
+      )
+    } catch (error) {
+      // 连接已被服务端断开时顺带剔除，避免僵尸连接阻塞后续所有操作
+      await this.evictOnConnectionLost(connId, '校验数据库', error)
+      throw error
+    }
     if (!databases.includes(database)) {
       throw new Error(`数据库不存在或当前账号不可访问: ${database}`)
     }

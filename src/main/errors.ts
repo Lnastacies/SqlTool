@@ -142,12 +142,44 @@ export function handleError(error: any, context: string): ErrorInfo {
   return errorInfo
 }
 
+/**
+ * 服务端已关闭该会话（空闲超时被断开、会话被踢下线）时的错误特征。
+ * 命中即意味着该连接对象已不可复用，必须整体剔除后重建。
+ * 各驱动表现不同：mysql2 为 "can't add new command when connection is closed"，
+ * PostgreSQL 为 "Connection terminated unexpectedly"，SQL Server 为 "Connection is closed"。
+ */
+const CONNECTION_CLOSED_PATTERNS = [
+  "can't add new command",
+  'connection is in closed state',
+  'connection is closed',
+  'connection was closed',
+  'connection is not open',
+  'connection terminated',
+  'connection ended',
+]
+
+/** 网络层面的连接丢失特征（服务端异常关闭、链路中断），同样不可复用 */
+const CONNECTION_BROKEN_PATTERNS = [
+  ...CONNECTION_CLOSED_PATTERNS,
+  'connection lost',
+  'protocol_connection_lost',
+  'econnreset',
+  'socket hang up',
+]
+
+export function isConnectionLostError(error: unknown): boolean {
+  const message = (
+    error instanceof Error ? error.message : String(error ?? '')
+  ).toLowerCase()
+  if (!message) return false
+  return CONNECTION_BROKEN_PATTERNS.some(pattern => message.includes(pattern))
+}
+
 export function analyzeError(error: any): ErrorInfo {
   const message = (error?.message || '').toLowerCase()
 
   // 网络类错误优先识别，避免落入泛化的 UNKNOWN_ERROR
-  if (message.includes('connection is in closed state')
-      || message.includes("can't add new command")) {
+  if (CONNECTION_CLOSED_PATTERNS.some(pattern => message.includes(pattern))) {
     return {
       ...ERROR_MESSAGES.CONNECTION_FAILED,
       message: '数据库连接已失效',

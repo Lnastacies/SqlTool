@@ -100,6 +100,26 @@ function connectionTimeoutMs(timeoutSeconds?: number): number {
   return Math.max(1, timeoutSeconds || 30) * 1000
 }
 
+/**
+ * 生成 MySQL 连接的日志标识。PromiseConnection 与 BaseConnection 的配置位置不同，
+ * 这里统一从底层对象取 host:port，避免在关闭路径里丢失上下文信息。
+ */
+function describeMysqlConnection(connection: unknown): string {
+  const raw = (connection as any)?.connection ?? connection
+  const config = (raw as any)?.config || {}
+  const host = config.host || 'unknown'
+  const port = config.port || 'unknown'
+  return `${host}:${port}`
+}
+
+/** 生成 PostgreSQL 连接的日志标识，取不到时回退为 client 实例标识。 */
+function describePgConnection(connection: unknown): string {
+  const config = (connection as any)?.connectionParameters || {}
+  const host = config.host || 'unknown'
+  const port = config.port || 'unknown'
+  return `${host}:${port}`
+}
+
 function dateTimeText(value: unknown): string | undefined {
   if (value == null || value === '') return undefined
   if (value instanceof Date) return value.toISOString()
@@ -212,7 +232,9 @@ export class MySQLAdapter extends DatabaseAdapter {
     } catch {
       return false
     } finally {
-      if (conn) await conn.end()
+      // 复用统一关闭语义：连接已断开时 close() 内部会降级并吞掉异常，
+      // 避免 finally 抛错覆盖上面的 return false
+      if (conn) await this.close(conn).catch(() => undefined)
     }
   }
 
@@ -535,8 +557,47 @@ export class MySQLAdapter extends DatabaseAdapter {
     }
   }
 
+  /**
+   * 关闭底层连接。目标：无论连接当前处于什么状态（正常、服务端已断开、超时），
+   * 都只做本地释放，不发送 QUIT，也不向调用方抛错。
+   *
+   * 注意：mysql2 的 PromiseConnection 只封装了 query/execute/end 等方法，
+   * 并没有 close()/destroy()，必须取到内部的 BaseConnection 才能真正释放 socket；
+   * 因此直接判断外层对象的 close 存在性会导致"静默不关闭"，此处按层级依次降级。
+   */
   async close(connection: mysql.Connection): Promise<void> {
-    await connection.end()
+    const connId = describeMysqlConnection(connection)
+    // PromiseConnection 的底层连接对象；若传入的本身就是 BaseConnection 则直接使用
+    const raw = (connection as any).connection ?? connection
+
+    // 1) 首选 BaseConnection.close()：同步关闭 socket，不发远程命令，已断开时也安全
+    if (raw && typeof raw.close === 'function') {
+      try {
+        raw.close()
+        return
+      } catch (error) {
+        logger.warn('MySQLAdapter', `close() 释放连接失败，降级尝试 destroy(): ${connId}, 原因=${(error as Error).message}`)
+      }
+    }
+
+    // 2) 降级 destroy()：强制销毁 socket（close 不存在或抛错时使用）
+    if (raw && typeof raw.destroy === 'function') {
+      logger.warn('MySQLAdapter', `close() 不可用或失败，已降级使用 destroy() 释放连接: ${connId}`)
+      try {
+        raw.destroy()
+        return
+      } catch (error) {
+        logger.warn('MySQLAdapter', `destroy() 释放连接失败，降级尝试 end(): ${connId}, 原因=${(error as Error).message}`)
+      }
+    }
+
+    // 3) 最后兜底 end()（会发 QUIT），连接已断开时可能抛错，统一吞掉避免影响关闭流程
+    logger.warn('MySQLAdapter', `close()/destroy() 均不可用，已降级使用 end() 释放连接: ${connId}`)
+    try {
+      await connection.end()
+    } catch (error) {
+      logger.warn('MySQLAdapter', `end() 释放连接异常(已忽略): ${connId}, 原因=${(error as Error).message}`)
+    }
   }
 }
 
@@ -576,7 +637,8 @@ export class PostgreSQLAdapter extends DatabaseAdapter {
     } catch {
       return false
     } finally {
-      if (client) await client.end()
+      // 同样复用统一关闭语义，确保连接超时/已断开时 return false 不被 end() 抛错覆盖
+      if (client) await this.close(client).catch(() => undefined)
     }
   }
 
@@ -841,8 +903,28 @@ export class PostgreSQLAdapter extends DatabaseAdapter {
     }
   }
 
+  /**
+   * 关闭底层连接。pg.Client 本身没有 destroy()（仅在内部使用 connection.stream.destroy），
+   * 且 end() 在已断开/超时连接上可能抛错或长时间等待 'end' 事件。
+   * 因此优先直接销毁底层 socket，取不到 stream 时才回退 end() 并吞掉异常。
+   */
   async close(connection: pg.Client): Promise<void> {
-    await connection.end()
+    // pg 的 Connection 实例挂在 client.connection 上，其 socket 来自 connection.stream
+    const stream = (connection as any)?.connection?.stream
+    if (stream && typeof stream.destroy === 'function') {
+      try {
+        stream.destroy()
+        return
+      } catch (error) {
+        logger.warn('PostgreSQLAdapter', `销毁底层 socket 失败，降级尝试 end(): ${describePgConnection(connection)}, 原因=${(error as Error).message}`)
+      }
+    }
+    try {
+      await connection.end()
+    } catch (error) {
+      // 连接已断开时 end() 抛错属预期，不应阻断上层清理
+      logger.warn('PostgreSQLAdapter', `end() 释放连接异常(已忽略): ${describePgConnection(connection)}, 原因=${(error as Error).message}`)
+    }
   }
 }
 

@@ -19,7 +19,7 @@
     "build:renderer": "npm run clean:renderer && node node_modules/vite/dist/node/cli.js build",
     "verify:production": "node scripts/verifyProductionBuild.cjs",
     "test:connection-config": "npm run build:main && node scripts/testConnectionConfig.cjs",
-    "test:connection-lifecycle": "npm run build:main && node scripts/testConnectionLifecycle.cjs",
+    "test:connection-lifecycle": "npm run build:main && node scripts/testConnectionLifecycle.cjs && node scripts/testConnectionLostClose.cjs",
     "test:connection-menu": "node scripts/testConnectionContextMenu.cjs",
     "test:connection-overview-ui": "node scripts/testConnectionDatabaseOverviewUi.cjs",
     "test:database-close-ui": "node scripts/testDatabaseCloseUi.cjs",

@@ -78,6 +78,8 @@ export interface DatabaseSummary {
 
 export interface CloseDatabaseResult {
   name: string
+  /** 关闭时检测到连接已失效并已剔除，渲染层需把连接回退为“未连接” */
+  connectionInvalidated?: boolean
 }
 
 export interface DropDatabaseResult {
