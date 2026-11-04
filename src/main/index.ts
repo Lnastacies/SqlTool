@@ -170,7 +170,7 @@ app.whenReady().then(async () => {
     return {
       name: pkg.name,
       productName: pkg.build?.productName || pkg.name || 'SQLTool',
-      version: app.getVersion() || pkg.version || '1.0.0',
+      version: app.getVersion() || pkg.version || '1.1.4',
       description: pkg.description || '',
       author: author.name || '',
       authorEmail: author.email || '',
