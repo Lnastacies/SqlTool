@@ -75,14 +75,20 @@ async function testDatabaseDump(tempDirectory) {
     databaseModel('MySQL', [parent, child]),
     'structure-data',
     {
-      loadPage: async () => {
+      openTable: async () => {
         pageCalls += 1
+        const rows = [
+          { id: 1, label: 'Alpha' },
+          { id: 2, label: "O'Reilly" },
+        ]
+        let sent = false
         return {
-          total: 2,
-          rows: [
-            { id: 1, label: 'Alpha' },
-            { id: 2, label: "O'Reilly" },
-          ],
+          total: rows.length,
+          readNext: async () => {
+            if (sent) return []
+            sent = true
+            return rows
+          },
         }
       },
     },
@@ -110,10 +116,18 @@ async function testDatabaseDump(tempDirectory) {
     databaseModel('MySQL', [modelTable('account')]),
     'data',
     {
-      loadPage: async () => ({
-        total: 1,
-        rows: [{ id: 1, label: '保留结构' }],
-      }),
+      openTable: async () => {
+        const rows = [{ id: 1, label: '保留结构' }]
+        let sent = false
+        return {
+          total: rows.length,
+          readNext: async () => {
+            if (sent) return []
+            sent = true
+            return rows
+          },
+        }
+      },
     },
   )
   const dataContent = await fs.promises.readFile(dataOutputPath, 'utf8')
@@ -125,7 +139,7 @@ async function testDatabaseDump(tempDirectory) {
     databaseModel('MySQL', [modelTable('account')]),
     'data',
     {
-      loadPage: async () => {
+      openTable: async () => {
         throw new Error('取消保存后不应读取数据')
       },
     },

@@ -120,7 +120,8 @@ export function buildCreateDatabaseStatement(
 ): string {
   const name = normalizeDatabaseName(type, input)
   switch (type) {
-    case 'MySQL': {
+    case 'MySQL':
+    case 'TDSQL': {
       if (options.encoding?.trim()) {
         throw new Error('MySQL 请使用字符集选项，不支持 PostgreSQL 编码选项')
       }
