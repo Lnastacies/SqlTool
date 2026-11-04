@@ -13,7 +13,7 @@ import {
 export interface ConnectionData {
   id: string
   name: string
-  type: 'MySQL' | 'PostgreSQL' | 'SQL Server' | 'SQLite'
+  type: 'MySQL' | 'PostgreSQL' | 'SQL Server' | 'SQLite' | 'TDSQL'
   groupId?: string
   host: string
   port: number
@@ -1749,6 +1749,7 @@ export function getAdapter(type: string): DatabaseAdapter {
   switch (type) {
     case 'MySQL':
     case 'MariaDB':
+    case 'TDSQL':
       return new MySQLAdapter()
     case 'PostgreSQL':
       return new PostgreSQLAdapter()

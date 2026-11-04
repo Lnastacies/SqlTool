@@ -39,6 +39,11 @@ export interface TableDefinition {
 export interface SaveTableStructureRequest {
   originalName?: string
   definition: TableDefinition
+  /** TDSQL 建表选项，仅 databaseType === 'TDSQL' 时使用 */
+  tdsqlOptions?: {
+    tableType: 'shard' | 'noshard' | 'broadcast'
+    shardKey?: string
+  }
 }
 
 export interface TableStructurePlan {

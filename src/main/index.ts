@@ -849,6 +849,32 @@ app.whenReady().then(async () => {
     return true
   })
 
+  // ======== TDSQL 分布式数据库 IPC 通道 ========
+
+  registerIPC('tdsql:getTableMetadata', async (_event, connId, database, tableName) => {
+    logger.info('IPC', `TDSQL 查询表元数据: 连接=${connId}, 数据库=${database}, 表=${tableName}`)
+    return connectionManager.getTDSQLTableMetadata(connId, database, tableName)
+  })
+
+  registerIPC('tdsql:getDatabaseOverview', async (_event, connId, database) => {
+    logger.info('IPC', `TDSQL 查询数据库概览: 连接=${connId}, 数据库=${database}`)
+    return connectionManager.getTDSQLDatabaseOverview(connId, database)
+  })
+
+  registerIPC('tdsql:getSessions', async (_event, connId) => {
+    logger.info('IPC', `TDSQL 查询会话列表: 连接=${connId}`)
+    return connectionManager.getTDSQLSessions(connId)
+  })
+
+  registerIPC('tdsql:getDdlTasks', async (_event, connId) => {
+    logger.info('IPC', `TDSQL 查询 DDL 任务: 连接=${connId}`)
+    return connectionManager.getTDSQLDdlTasks(connId)
+  })
+
+  // 说明：分片透传查询（/*proxy*/）能力当前无功能入口且可对分片执行任意 SQL，
+  // 出于最小权限考虑暂不注册 IPC 通道；TDSQLMonitorService 中保留实现，
+  // 待后续功能落地时需补充只读/语句类型校验后再开放。
+
   logger.info('Main', 'IPC通道注册完成')
   await createWindow()
 

@@ -12,6 +12,7 @@ import type {
   TableDefinition,
   TableStructurePlan,
 } from './tableStructureTypes'
+import { isMySQLCompatible } from './mysqlCompat'
 
 function validateOriginalMappings(
   original: TableDefinition,
@@ -36,11 +37,18 @@ export function buildTableStructurePlan(
   database: string,
   definition: TableDefinition,
   original?: TableDefinition,
+  tdsqlOptions?: {
+    tableType: 'shard' | 'noshard' | 'broadcast'
+    shardKey?: string
+  },
 ): TableStructurePlan {
+  // 完整建表结构预览需要包含 TDSQL 分表/广播后缀
   const definitionStatements = buildCreateTableStatements(
     databaseType,
     database,
     definition,
+    undefined,
+    tdsqlOptions,
   )
   if (!original) {
     const warnings = (
@@ -68,7 +76,7 @@ export function buildTableStructurePlan(
   }
 
   let plan: TableStructurePlan
-  if (databaseType === 'MySQL') {
+  if (isMySQLCompatible(databaseType)) {
     plan = buildMySQLAlterPlan(database, original, definition)
   } else if (databaseType === 'PostgreSQL') {
     plan = buildPostgresAlterPlan(database, original, definition)

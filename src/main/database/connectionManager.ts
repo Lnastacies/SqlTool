@@ -7,6 +7,12 @@ import {
   TableMetadata,
   TableSummary,
 } from './adapters'
+import { TDSQLMetadataService } from './tdsql/tdsqlMetadataService'
+import { TDSQLMonitorService } from './tdsql/tdsqlMonitorService'
+import type {
+  TDSQLDatabaseOverview,
+  TDSQLTableMetadata,
+} from './tdsql/tdsqlMetadataTypes'
 import * as fs from 'fs'
 import * as path from 'path'
 import { logger } from '../logger'
@@ -865,6 +871,13 @@ export class ConnectionManager {
       'ConnectionManager',
       `开始保存表结构: 连接=${connId}, 数据库=${database}, 原表=${normalizedRequest.originalName || '新建'}, 新表=${normalizedRequest.definition.name}, 模式=${plan.mode}, 语句数=${plan.statements.length}`,
     )
+    // TDSQL 分表/广播选项的日志埋点，便于后续排查 SHARDKEY/BROADCAST 问题
+    if (normalizedRequest.tdsqlOptions) {
+      logger.info(
+        'ConnectionManager',
+        `TDSQL 建表选项: 表类型=${normalizedRequest.tdsqlOptions.tableType}, SHARDKEY=${normalizedRequest.tdsqlOptions.shardKey || '未指定'}, 表=${normalizedRequest.definition.name}`,
+      )
+    }
     try {
       await this.executeTableStructurePlan(
         activeConn,
@@ -1626,6 +1639,7 @@ export class ConnectionManager {
       database,
       normalizedRequest.definition,
       originalDefinition,
+      normalizedRequest.tdsqlOptions,
     )
     if (activeConn.connData.type === 'SQLite' && originalName) {
       const triggers = this.readSQLiteTableTriggers(
@@ -2208,4 +2222,59 @@ export class ConnectionManager {
       ddl: '',
     }
   }
+
+  // ======== TDSQL 分布式数据库支持 ========
+
+  /**
+   * 获取 TDSQL 连接的活跃连接，供元数据/监控服务使用
+   * 仅当连接类型为 TDSQL 时可用
+   */
+  private resolveTDSQLConnection(connId: string) {
+    const active = this.connections.get(connId)
+    if (!active) {
+      throw new Error('连接不存在或未建立连接')
+    }
+    if (active.connData.type !== 'TDSQL') {
+      throw new Error(`当前连接类型为 ${active.connData.type}，TDSQL 功能仅支持 TDSQL 连接`)
+    }
+    return active
+  }
+
+  /** 查询 TDSQL 表的分布式元数据（表类型、SHARDKEY、分区分布） */
+  async getTDSQLTableMetadata(
+    connId: string,
+    database: string,
+    tableName: string,
+  ): Promise<TDSQLTableMetadata> {
+    const active = this.resolveTDSQLConnection(connId)
+    const service = new TDSQLMetadataService(active.adapter, active.connection)
+    return service.getTableMetadata(database, tableName)
+  }
+
+  /** 查询 TDSQL 数据库的分布式概览 */
+  async getTDSQLDatabaseOverview(
+    connId: string,
+    database: string,
+  ): Promise<TDSQLDatabaseOverview> {
+    const active = this.resolveTDSQLConnection(connId)
+    const service = new TDSQLMetadataService(active.adapter, active.connection)
+    return service.getDatabaseOverview(database)
+  }
+
+  /** 查询 TDSQL 会话列表（含扩展字段） */
+  async getTDSQLSessions(connId: string) {
+    const active = this.resolveTDSQLConnection(connId)
+    const service = new TDSQLMonitorService(active.adapter, active.connection)
+    return service.getSessions()
+  }
+
+  /** 查询 TDSQL DDL 任务 */
+  async getTDSQLDdlTasks(connId: string) {
+    const active = this.resolveTDSQLConnection(connId)
+    const service = new TDSQLMonitorService(active.adapter, active.connection)
+    return service.getDdlTasks()
+  }
+
+  // 注：TDSQL 分片透传查询（/*proxy*/）可绕过中间件对分片执行任意 SQL，
+  // 当前无 UI 入口，暂不向 IPC 暴露；待增加只读/语句类型校验后再开放。
 }

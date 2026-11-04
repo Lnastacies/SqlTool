@@ -1,6 +1,7 @@
 import type {
   DatabaseObjectCategory,
 } from '../features/database-objects/databaseObjectModel'
+import type { EditorActionId } from '../monaco/editorRegistry'
 
 export type AppCommandId =
   | 'connection.new'
@@ -64,6 +65,8 @@ export interface CommandActions {
   executeQuery: () => void
   executeAllQuery: () => void
   stopQuery: () => void
+  /** 分发 Monaco 编辑器内置动作：撤销/重做/查找/替换 */
+  editDocument: (action: EditorActionId) => void
   showObjects: () => void
   selectObjectCategory: (category: DatabaseObjectCategory) => void
   toggleDetails: () => void
@@ -90,6 +93,8 @@ export interface CommandState {
   canExecuteQuery: boolean
   canStopQuery: boolean
   canSaveSqlFile: boolean
+  /** 当前活动文档是否为可编辑的查询文档，用于启用编辑类命令 */
+  canEditDocument: boolean
   canShowObjects: boolean
   canUseDatabaseTools: boolean
   canFavoriteCurrent: boolean

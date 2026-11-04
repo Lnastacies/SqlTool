@@ -20,6 +20,8 @@ function duplicateNames(values: string[]): string[] {
 export function validateTableDefinitionDraft(
   databaseType: DatabaseType,
   draft: TableDefinitionDraft,
+  /** 是否为新建表；编辑表不允许变更 TDSQL 分片属性，无需校验 SHARDKEY */
+  isNewTable = true,
 ): string[] {
   const issues: string[] = []
   if (!draft.name.trim()) issues.push('表名不能为空')
@@ -52,13 +54,27 @@ export function validateTableDefinitionDraft(
   }
 
   const fieldNames = new Set(
-    draft.fields.map(field => field.name.trim()).filter(Boolean),
+    draft.fields.map(field => field.name.trim().toLowerCase()).filter(Boolean),
   )
+
+  // TDSQL 分表（shard）必须指定存在的 SHARDKEY 字段，否则会静默建成单表。
+  // 仅新建表强制；编辑表不支持变更分片属性（控件在编辑态禁用）。
+  if (isNewTable && databaseType === 'TDSQL' && draft.tdsql) {
+    if (draft.tdsql.tableType === 'shard') {
+      const shardKey = draft.tdsql.shardKey?.trim()
+      if (!shardKey) {
+        issues.push('TDSQL 分表必须指定 SHARDKEY 分片键')
+      } else if (!fieldNames.has(shardKey.toLowerCase())) {
+        issues.push(`SHARDKEY 分片键字段“${shardKey}”不存在`)
+      }
+    }
+  }
+
   draft.indexes.forEach((index, position) => {
     if (!index.name.trim()) issues.push(`第 ${position + 1} 个索引缺少名称`)
     if (index.fields.length === 0) {
       issues.push(`索引“${index.name || position + 1}”尚未选择字段`)
-    } else if (index.fields.some(field => !fieldNames.has(field))) {
+    } else if (index.fields.some(field => !fieldNames.has(field.trim().toLowerCase()))) {
       issues.push(`索引“${index.name || position + 1}”引用了无效字段`)
     }
   })
@@ -74,7 +90,7 @@ export function validateTableDefinitionDraft(
     if (!foreignKey.name.trim()) issues.push(`第 ${position + 1} 个外键缺少名称`)
     if (foreignKey.fields.length === 0) {
       issues.push(`外键“${label}”尚未选择本地字段`)
-    } else if (foreignKey.fields.some(field => !fieldNames.has(field))) {
+    } else if (foreignKey.fields.some(field => !fieldNames.has(field.trim().toLowerCase()))) {
       issues.push(`外键“${label}”引用了无效的本地字段`)
     }
     if (!foreignKey.referencedTable.trim()) {

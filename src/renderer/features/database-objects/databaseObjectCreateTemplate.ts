@@ -12,7 +12,13 @@ FROM target_table;
 `
 
 const FUNCTION_SQL: Record<ConnectionData['type'], string> = {
+  // TDSQL 兼容 MySQL 语法，函数模板直接复用
   MySQL: `CREATE FUNCTION function_name()
+RETURNS VARCHAR(255)
+DETERMINISTIC
+RETURN '';
+`,
+  TDSQL: `CREATE FUNCTION function_name()
 RETURNS VARCHAR(255)
 DETERMINISTIC
 RETURN '';
@@ -40,7 +46,13 @@ SELECT 1;
 }
 
 const EVENT_SQL: Record<ConnectionData['type'], string> = {
+  // TDSQL 兼容 MySQL 语法，事件模板直接复用
   MySQL: `CREATE EVENT event_name
+ON SCHEDULE EVERY 1 DAY
+DO
+  DELETE FROM target_table WHERE 1 = 0;
+`,
+  TDSQL: `CREATE EVENT event_name
 ON SCHEDULE EVERY 1 DAY
 DO
   DELETE FROM target_table WHERE 1 = 0;
