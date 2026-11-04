@@ -29,7 +29,7 @@
     "test:database-object-menu-ui": "node scripts/testDatabaseObjectCategoryMenuUi.cjs",
     "test:table-transfer-ui": "node scripts/testTableTransferWizardUi.cjs",
     "test:database-objects": "npm run build:main && node scripts/testDatabaseObjectMetadata.cjs",
-    "test:database-backup": "npm run build:main && node scripts/testDatabaseBackupNaming.cjs && node scripts/testDatabaseBackupParser.cjs && node scripts/testDatabaseBackupObjects.cjs && node scripts/testDatabaseBackupSqlGeneration.cjs && node scripts/testDatabaseBackupLifecycle.cjs && node scripts/testDatabaseBackupFailure.cjs",
+    "test:database-backup": "npm run build:main && node scripts/testDatabaseBackupNaming.cjs && node scripts/testDatabaseBackupParser.cjs && node scripts/testDatabaseBackupObjects.cjs && node scripts/testDatabaseBackupSqlGeneration.cjs && node scripts/testDatabaseBackupTableReader.cjs && node scripts/testDatabaseBackupLifecycle.cjs && node scripts/testDatabaseBackupFailure.cjs",
     "test:database-backup-ui": "node scripts/testDatabaseBackupUi.cjs",
     "test:table-features": "npm run build:main && node scripts/testTableFeatures.cjs && node scripts/testTableTransferFormats.cjs && node scripts/testTableTransferModel.cjs && node scripts/testTableDataTypes.cjs && node scripts/testTableDesignerSubmitLog.cjs",
     "test:database-tools": "npm run build:main && node scripts/testDatabaseTools.cjs && node scripts/testDatabaseToolExecution.cjs && node scripts/testStructureSyncExecution.cjs && node scripts/testStructureSyncSafety.cjs",

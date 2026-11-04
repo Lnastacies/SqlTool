@@ -3,7 +3,6 @@ import type { ActiveConnection } from './databaseConnectionRegistry'
 import type { DatabaseModelTable } from './databaseManagementTypes'
 import type { ConnectionData } from './adapters'
 import {
-  quoteSqlString,
   quoteTableIdentifier,
   tableReference,
 } from './tableStructureSqlCommon'
@@ -41,6 +40,9 @@ function resolveStrategy(table: DatabaseModelTable): ReaderStrategy {
   return { kind: 'offset' }
 }
 
+// SQL Server 不允许对 text/ntext/image/xml 及空间类型排序，构造兜底 ORDER BY 时要跳过
+const SQLSERVER_UNSORTABLE_TYPE_PATTERN = /^(?:text|ntext|image|xml|geography|geometry|hierarchyid)\b/i
+
 function buildReaderOrderClause(
   databaseType: ConnectionData['type'],
   table: DatabaseModelTable,
@@ -52,12 +54,35 @@ function buildReaderOrderClause(
   }
   // OFFSET 翻页必须有稳定排序，否则跨页可能重复或丢行
   const primaryFields = table.fields.filter(field => field.primary)
-  if (primaryFields.length === 0) {
+  if (primaryFields.length > 0) {
+    return ` ORDER BY ${primaryFields
+      .map(field => `${quote(field.name)} ASC`)
+      .join(', ')}`
+  }
+  // 无主键表没有天然稳定顺序：退化为按全列排序，并在调用方打 warn 说明风险
+  const sortableFields = table.fields.filter(field => (
+    databaseType !== 'SQL Server'
+    || !SQLSERVER_UNSORTABLE_TYPE_PATTERN.test(field.type.trim())
+  ))
+  if (sortableFields.length === 0) {
+    // 极端情况：列全部不可排序，只能交给数据库默认顺序
     return databaseType === 'SQL Server' ? ' ORDER BY (SELECT NULL)' : ''
   }
-  return ` ORDER BY ${primaryFields
+  return ` ORDER BY ${sortableFields
     .map(field => `${quote(field.name)} ASC`)
     .join(', ')}`
+}
+
+/** 按数据库类型生成参数占位符：MySQL/SQLite 用 ?，PostgreSQL 用 $n，SQL Server 用 @pn */
+function buildPlaceholder(databaseType: ConnectionData['type'], index: number): string {
+  if (databaseType === 'PostgreSQL') return `$${index + 1}`
+  if (databaseType === 'SQL Server') return `@p${index}`
+  return '?'
+}
+
+interface BatchSql {
+  sql: string
+  parameters: unknown[]
 }
 
 function buildBatchSql(
@@ -68,21 +93,25 @@ function buildBatchSql(
   batchSize: number,
   offset: number,
   lastPk: unknown,
-): string {
+): BatchSql {
   const isSqlServer = databaseType === 'SQL Server'
   if (strategy.kind === 'keyset') {
     const pkColumn = quoteTableIdentifier(strategy.primaryKey!, databaseType)
-    // 主键值来自数据库本身而非用户输入；字符串形式内联以兼容 bigint 精度
-    const whereClause = lastPk === undefined
-      ? ''
-      : ` WHERE ${pkColumn} > ${quoteSqlString(String(lastPk))}`
-    return isSqlServer
+    // 主键值来自数据库本身而非用户输入，但仍通过参数占位符传递，
+    // 避免 String() 后拼接为 SQL 字面量带来的转义/精度/注入问题
+    const hasCondition = lastPk !== undefined && lastPk !== null
+    const whereClause = hasCondition
+      ? ` WHERE ${pkColumn} > ${buildPlaceholder(databaseType, 0)}`
+      : ''
+    const sql = isSqlServer
       ? `SELECT TOP ${batchSize} * FROM ${tableRef}${whereClause}${orderClause}`
       : `SELECT * FROM ${tableRef}${whereClause}${orderClause} LIMIT ${batchSize}`
+    return { sql, parameters: hasCondition ? [lastPk] : [] }
   }
-  return isSqlServer
+  const sql = isSqlServer
     ? `SELECT * FROM ${tableRef}${orderClause} OFFSET ${offset} ROWS FETCH NEXT ${batchSize} ROWS ONLY`
     : `SELECT * FROM ${tableRef}${orderClause} LIMIT ${batchSize} OFFSET ${offset}`
+  return { sql, parameters: [] }
 }
 
 /**
@@ -106,14 +135,26 @@ export async function createBackupTableReader(
   // PostgreSQL 的数据库由连接会话决定，executeSQL 的数据库参数必须置空
   const executionDatabase = databaseType === 'PostgreSQL' ? '' : database
 
-  const execute = async (sql: string): Promise<Record<string, unknown>[]> => {
+  const execute = async (
+    sql: string,
+    parameters: unknown[] = [],
+  ): Promise<Record<string, unknown>[]> => {
     const result = await active.adapter.executeSQL(
       active.connection,
       executionDatabase,
       sql,
+      parameters,
     )
     if (!result.success) throw new Error(result.message)
     return (result.rows || []) as Record<string, unknown>[]
+  }
+
+  // 无主键时无法保证跨批次的稳定顺序，明确告警便于排查“行重复/丢失”问题
+  if (strategy.kind === 'offset' && table.fields.every(field => !field.primary)) {
+    logger.warn(
+      'DatabaseBackup',
+      `表无主键，回退按全列排序分页，数据可能因并发写入出现重复或遗漏: 表=${table.name}, 列数=${table.fields.length}`,
+    )
   }
 
   // COUNT 只执行一次，供进度展示；读取循环以“读到空批”作为结束条件
@@ -134,7 +175,7 @@ export async function createBackupTableReader(
     total,
     readNext: async () => {
       if (exhausted) return []
-      const rows = await execute(buildBatchSql(
+      const batch = buildBatchSql(
         databaseType,
         tableRef,
         strategy,
@@ -142,7 +183,8 @@ export async function createBackupTableReader(
         batchSize,
         offset,
         lastPk,
-      ))
+      )
+      const rows = await execute(batch.sql, batch.parameters)
       if (rows.length === 0) {
         exhausted = true
         logger.debug(
