@@ -541,11 +541,20 @@ export class ConnectionManager {
       )
       return { name: database }
     } catch (error) {
-      logger.error(
-        'ConnectionManager',
-        `关闭数据库上下文失败: 连接=${connId}, 数据库=${database}, 耗时=${Date.now() - startedAt}ms`,
-        error instanceof Error ? error : undefined,
-      )
+      // 连接已被清理（重复关闭 / 关闭后再次关闭）属于幂等的预期场景，
+      // 不是真实故障，日志降级为 warn 避免误导排障
+      if (!this.connections.has(connId)) {
+        logger.warn(
+          'ConnectionManager',
+          `关闭数据库上下文跳过(连接已不存在): 连接=${connId}, 数据库=${database}, 原因=${(error as Error)?.message || String(error)}, 耗时=${Date.now() - startedAt}ms`,
+        )
+      } else {
+        logger.error(
+          'ConnectionManager',
+          `关闭数据库上下文失败: 连接=${connId}, 数据库=${database}, 耗时=${Date.now() - startedAt}ms`,
+          error instanceof Error ? error : undefined,
+        )
+      }
       throw error
     }
   }
