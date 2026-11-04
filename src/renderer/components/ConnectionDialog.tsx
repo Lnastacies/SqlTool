@@ -11,6 +11,7 @@ import {
 import CheckCircleOutlined from '@ant-design/icons/CheckCircleOutlined'
 import DatabaseOutlined from '@ant-design/icons/DatabaseOutlined'
 import SaveOutlined from '@ant-design/icons/SaveOutlined'
+import { isMySQLCompatible } from '../features/mysqlCompat'
 import type {
   ConnectionData,
   ConnectionDraft,
@@ -40,8 +41,11 @@ const databaseTypes = [
   { value: 'SQLite', label: 'SQLite' },
 ]
 
+// TDSQL 不在新建连接类型下拉中（连接经配置导入产生），此处仅为类型完整性补全，
+// 默认端口与主进程 connectionConfigMigration 的 defaultPort 保持一致
 const defaultPorts: Record<DatabaseType, number> = {
   MySQL: 3306,
+  TDSQL: 3306,
   PostgreSQL: 5432,
   'SQL Server': 1433,
   SQLite: 0,
@@ -225,7 +229,7 @@ function ConnectionDialog({
                 form.setFieldsValue({
                   port: defaultPorts[value],
                   database: '',
-                  charset: value === 'MySQL' ? 'utf8mb4' : undefined,
+                  charset: isMySQLCompatible(value) ? 'utf8mb4' : undefined,
                 })
               }}
             />

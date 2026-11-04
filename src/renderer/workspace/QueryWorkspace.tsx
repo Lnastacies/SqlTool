@@ -2,12 +2,17 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { message } from 'antd'
 import Editor from '@monaco-editor/react'
 import type { OnMount } from '@monaco-editor/react'
+import type { editor } from 'monaco-editor'
 import type { ConnectionData } from '../types'
 import type { QueryExecutionMode } from './queryExecutionSql'
 import QueryResultPanel from './QueryResultPanel'
 import QueryWorkspaceToolbar from './QueryWorkspaceToolbar'
 import type { QueryWorkspaceDocument } from './workspaceTypes'
 import { buildQueryResultCsv } from './queryResultCsv'
+import {
+  registerEditor,
+  unregisterEditor,
+} from '../monaco/editorRegistry'
 
 interface QueryWorkspaceProps {
   document: QueryWorkspaceDocument
@@ -41,8 +46,26 @@ export default function QueryWorkspace({
 }: QueryWorkspaceProps) {
   const [databases, setDatabases] = useState<string[]>([])
   const cursorListener = useRef<{ dispose: () => void }>()
+  /** 保存当前 mount 的 Monaco editor 实例，便于卸载时注销注册。 */
+  const editorRef = useRef<editor.IStandaloneCodeEditor>()
 
-  useEffect(() => () => cursorListener.current?.dispose(), [])
+  // 卸载时清理 cursor 监听与编辑器注册表引用，避免内存泄漏与重复注册警告
+  useEffect(() => () => {
+    cursorListener.current?.dispose()
+    if (editorRef.current) {
+      unregisterEditor(document.id, editorRef.current)
+      editorRef.current = undefined
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 切换文档（id 变化）时需将之前的 editor 注销，避免注册表指向错误实例
+  useEffect(() => () => {
+    if (editorRef.current) {
+      unregisterEditor(document.id, editorRef.current)
+      editorRef.current = undefined
+    }
+  }, [document.id])
 
   useEffect(() => {
     if (!document.connId || !activeConnections.has(document.connId)) {
@@ -74,6 +97,10 @@ export default function QueryWorkspace({
   }, [activeConnections, document.connId])
 
   const handleEditorMount: OnMount = (editor) => {
+    // 先记录引用，后续 useEffect 清理时使用
+    editorRef.current = editor as editor.IStandaloneCodeEditor
+    // 注册到模块级注册表，使顶部命令系统可跨组件分发 undo/redo/find/replace 等动作
+    registerEditor(document.id, editor as editor.IStandaloneCodeEditor)
     cursorListener.current?.dispose()
     const updateExecutionContext = () => {
       const model = editor.getModel()

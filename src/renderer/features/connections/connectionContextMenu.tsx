@@ -3,6 +3,7 @@ import type { MenuProps } from 'antd'
 import BgColorsOutlined from '@ant-design/icons/BgColorsOutlined'
 import CheckOutlined from '@ant-design/icons/CheckOutlined'
 import CodeOutlined from '@ant-design/icons/CodeOutlined'
+import ClusterOutlined from '@ant-design/icons/ClusterOutlined'
 import ConsoleSqlOutlined from '@ant-design/icons/ConsoleSqlOutlined'
 import CopyOutlined from '@ant-design/icons/CopyOutlined'
 import DatabaseOutlined from '@ant-design/icons/DatabaseOutlined'
@@ -35,6 +36,8 @@ interface ConnectionContextMenuOptions {
   onMoveToGroup: (groupId?: string) => void
   onNewGroup: () => void
   onSetColor: (color?: string) => void
+  /** 打开 TDSQL 集群监控面板（仅 TDSQL 连接显示） */
+  onOpenClusterMonitor?: () => void
 }
 
 export function buildConnectionContextMenu({
@@ -55,6 +58,7 @@ export function buildConnectionContextMenu({
   onMoveToGroup,
   onNewGroup,
   onSetColor,
+  onOpenClusterMonitor,
 }: ConnectionContextMenuOptions): MenuProps['items'] {
   const groupItems: MenuProps['items'] = [
     {
@@ -163,6 +167,15 @@ export function buildConnectionContextMenu({
       label: '运行SQL文件...',
       onClick: onRunSqlFile,
     },
+    // TDSQL 连接专属：集群监控面板，仅 TDSQL 类型且处于连接态时显示
+    ...(connection.type === 'TDSQL' && active && onOpenClusterMonitor
+      ? [{
+        key: 'cluster-monitor',
+        icon: <ClusterOutlined />,
+        label: '集群监控...',
+        onClick: onOpenClusterMonitor,
+      }]
+      : []),
     { type: 'divider' },
     {
       key: 'refresh',

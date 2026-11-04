@@ -12,6 +12,7 @@ import {
   mysqlCollationOptions,
   mysqlDefaultCollation,
 } from '../features/databases/createDatabaseEncodingOptions'
+import { isMySQLCompatible } from '../features/mysqlCompat'
 
 interface CreateDatabaseDialogProps {
   connection: ConnectionData
@@ -24,6 +25,7 @@ interface CreateDatabaseDialogProps {
 
 const NAME_LIMITS: Record<Exclude<ConnectionData['type'], 'SQLite'>, number> = {
   MySQL: 64,
+  TDSQL: 64,
   PostgreSQL: 63,
   'SQL Server': 128,
 }
@@ -34,7 +36,8 @@ function CreateDatabaseDialog({
   onCreate,
 }: CreateDatabaseDialogProps) {
   const [name, setName] = useState('')
-  const initialCharset = connection.type === 'MySQL'
+  const mysqlCompatible = isMySQLCompatible(connection.type)
+  const initialCharset = mysqlCompatible
     ? connection.charset?.trim() || 'utf8mb4'
     : undefined
   const [charset, setCharset] = useState<string | undefined>(initialCharset)
@@ -42,7 +45,7 @@ function CreateDatabaseDialog({
     connection.type === 'PostgreSQL' ? 'UTF8' : undefined,
   )
   const [collation, setCollation] = useState<string | undefined>(
-    connection.type === 'MySQL'
+    mysqlCompatible
       ? mysqlDefaultCollation(initialCharset || 'utf8mb4')
       : undefined,
   )
@@ -56,7 +59,7 @@ function CreateDatabaseDialog({
     [connection.type],
   )
   const createOptions = useMemo<CreateDatabaseOptions>(() => ({
-    charset: connection.type === 'MySQL' ? charset : undefined,
+    charset: isMySQLCompatible(connection.type) ? charset : undefined,
     encoding: connection.type === 'PostgreSQL' ? encoding : undefined,
     collation: collation?.trim() || undefined,
   }), [charset, collation, connection.type, encoding])
@@ -70,7 +73,7 @@ function CreateDatabaseDialog({
   )
 
   useEffect(() => {
-    if (connection.type !== 'MySQL') return
+    if (!isMySQLCompatible(connection.type)) return
     let active = true
     setCatalogLoading(true)
     void window.logger.write(
@@ -168,7 +171,7 @@ function CreateDatabaseDialog({
             onPressEnter={() => void handleCreate()}
           />
         </Form.Item>
-        {connection.type === 'MySQL' && (
+        {isMySQLCompatible(connection.type) && (
           <>
             <Form.Item label="默认字符集">
               <Select

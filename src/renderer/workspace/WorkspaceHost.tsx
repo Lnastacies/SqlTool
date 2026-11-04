@@ -294,7 +294,15 @@ export default function WorkspaceHost({
           ) : (
             <div className="workspace-placeholder">
               <DatabaseOutlined />
-              <span>{document.name}工作区正在迁移</span>
+              {/* 通用工作区占位：当前版本仅有查询、数据两类内置文档；
+                  其他类型（模型、报表、传输等）通常通过独立对话框承载，
+                  此处给出友好提示而非显示「正在迁移」以免误解为功能故障。 */}
+              <span className="workspace-placeholder__title">
+                {document.name}
+              </span>
+              <span className="workspace-placeholder__subtitle">
+                工作区内容已在独立窗口中打开，可使用顶部菜单切换相关功能。
+              </span>
             </div>
           ),
         }))}

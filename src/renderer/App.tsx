@@ -28,9 +28,14 @@ import {
   useDatabaseActions,
   type DatabaseActionContext,
 } from './features/databases/useDatabaseActions'
+import {
+  isConnectionInvalidError,
+  responseError,
+} from './features/databases/databaseActionRunners'
 import TableDesignerDialog from './features/tables/TableDesignerDialog'
 import TableExportDialog from './features/tables/TableExportDialog'
 import TableImportDialog from './features/tables/TableImportDialog'
+import TDSQLMonitorPanel from './features/tdsql/TDSQLMonitorPanel'
 import DatabaseToolDialog from './features/database-tools/DatabaseToolDialog'
 import DatabaseBackupDialog from './features/backups/DatabaseBackupDialog'
 import DatabaseRestoreDialog from './features/backups/DatabaseRestoreDialog'
@@ -129,6 +134,10 @@ import {
   type QueryExecutionMode,
 } from './workspace/queryExecutionSql'
 import {
+  executeEditorAction,
+  type EditorActionId,
+} from './monaco/editorRegistry'
+import {
   buildConnectionTree,
   findConnectionTreeItem,
   updateConnectionTreeNode,
@@ -146,6 +155,15 @@ import {
   type DatabaseObjectSelection,
   type DatabaseObjects,
 } from './features/database-objects/databaseObjectModel'
+import {
+  clearConnection as clearObjectCacheConnection,
+  clearDatabase as clearObjectCacheDatabase,
+  clearTableMetadata as clearObjectCacheTableMetadata,
+  getTableMetadata as getCachedTableMetadata,
+  getTableSummaries as getCachedTableSummaries,
+  setTableMetadata as setCachedTableMetadata,
+  setTableSummaries as setCachedTableSummaries,
+} from './features/database-objects/databaseObjectCache'
 import {
   createDatabaseObjectGroup,
   loadDatabaseObjectGroups,
@@ -452,6 +470,71 @@ declare global {
       update: (id: string, updates: any) => Promise<IPCResponse<boolean>>
       delete: (id: string) => Promise<IPCResponse<boolean>>
     }
+    /** TDSQL 分布式数据库扩展 IPC，仅 TDSQL 连接可用 */
+    tdsql: {
+      getTableMetadata: (
+        connId: string,
+        database: string,
+        tableName: string,
+      ) => Promise<IPCResponse<{
+        tableName: string
+        tableType: string
+        shardKey: { fieldName: string; source: string } | null
+        engine: string
+        partitions: Array<{
+          partitionName: string
+          subpartitionName: string | null
+          partitionMethod: string | null
+          partitionExpression: string | null
+          tableRows: number
+          dataLength: number
+          indexLength: number
+          tableSchema: string
+        }>
+      }>>
+      getDatabaseOverview: (
+        connId: string,
+        database: string,
+      ) => Promise<IPCResponse<{
+        database: string
+        shardedCount: number
+        noshardCount: number
+        broadcastCount: number
+        unknownCount: number
+        tables: Array<{
+          tableName: string
+          tableType: string
+          shardKey: { fieldName: string; source: string } | null
+          engine: string
+          partitions: Array<{
+            partitionName: string
+            subpartitionName: string | null
+            partitionMethod: string | null
+            partitionExpression: string | null
+            tableRows: number
+            dataLength: number
+            indexLength: number
+            tableSchema: string
+          }>
+        }>
+      }>>
+      getSessions: (connId: string) => Promise<IPCResponse<{
+        id: number
+        user: string
+        host: string
+        db: string | null
+        command: string
+        time: number
+        timeMs: number | null
+        state: string | null
+        rowsSent: number | null
+        tid: number | null
+        info: string | null
+      }[]>>
+      getDdlTasks: (
+        connId: string,
+      ) => Promise<IPCResponse<Record<string, unknown>[]>>
+    }
   }
 }
 
@@ -600,6 +683,19 @@ function App() {
     database: string
   }>()
   const [showAutomation, setShowAutomation] = useState(false)
+  /** TDSQL 集群监控面板：处于打开状态时记录对应连接 */
+  const [clusterMonitorConnection, setClusterMonitorConnection] =
+    useState<ConnectionData | null>(null)
+  /** 监控面板中分片分布子面板的当前数据库表列表 */
+  const [monitorTables, setMonitorTables] = useState<string[]>([])
+  /** 监控面板表列表加载态 */
+  const [monitorTablesLoading, setMonitorTablesLoading] = useState(false)
+  /**
+   * 监控面板表列表请求序号。
+   * 快速切换数据库时仅接收最后一次请求的结果，防止旧库响应覆盖新库；
+   * 同时作为重复请求的判据，配合子面板 effect 防重，避免请求风暴。
+   */
+  const monitorTablesSeqRef = useRef(0)
   const [status, setStatus] = useState({ connection: '未连接', database: '未选择', executionTime: '0.0000', recordCount: 0 })
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const {
@@ -636,6 +732,17 @@ function App() {
       setTableSummaries([])
       setTableSummariesError('')
     }
+    // 清理 TDSQL 集群监控面板状态，连接断开时关闭面板
+    if (clusterMonitorConnection?.id === connId) {
+      setClusterMonitorConnection(null)
+      setMonitorTables([])
+      setMonitorTablesLoading(false)
+      void window.logger.write(
+        'info',
+        'TDSQLMonitor',
+        `集群监控面板已随连接关闭: 连接=${connId}`,
+      )
+    }
     if (clearConnection || clearDatabase) {
       setStatus(previous => ({
         ...previous,
@@ -643,6 +750,34 @@ function App() {
         database: clearDatabase ? '未选择' : previous.database,
       }))
     }
+  }
+
+  /**
+   * 连接在空闲期间被服务端断开（或已不存在）时的本地状态复位：
+   * 把连接回退为“未连接”、清空对象缓存与选中上下文，并提示用户重新连接。
+   * 按既定策略不做自动重连，由用户点击连接手动重建。
+   */
+  const resetInvalidConnection = (connection: ConnectionData) => {
+    setActiveConnections(previous => {
+      if (!previous.has(connection.id)) return previous
+      const next = new Set(previous)
+      next.delete(connection.id)
+      return next
+    })
+    setTreeData(previous => updateConnectionTreeNode(
+      previous,
+      item => item.type === 'connection' && item.connId === connection.id,
+      item => ({ ...item, children: undefined }),
+    ))
+    clearConnectionContext(connection.id)
+    // 清掉该连接的全部对象缓存，避免重连后读到失效连接期间的陈旧数据
+    clearObjectCacheConnection(connection.id)
+    void window.logger.write(
+      'warn',
+      'ConnectionWorkspace',
+      `数据库连接已失效，已重置连接状态: 连接=${connection.id}, 名称=${connection.name}, 类型=${connection.type}`,
+    )
+    message.warning('数据库连接已失效，请重新连接')
   }
 
   useEffect(() => {
@@ -766,7 +901,7 @@ function App() {
     try {
       const result = await window.database.getDatabaseSummaries(connId)
       if (!result?.success) {
-        throw new Error(result?.error?.message || '数据库摘要加载失败')
+        throw responseError(result || {}, '数据库摘要加载失败')
       }
       const summaries = Array.isArray(result.data) ? result.data : []
       const databases = summaries.map(summary => summary.name)
@@ -807,7 +942,14 @@ function App() {
         'ConnectionWorkspace',
         `加载数据库列表失败: 连接=${connId}, 原因=${detail}`,
       )
-      message.error(`加载数据库列表失败: ${detail}`)
+      // 连接已被服务端断开时，这里同时把连接状态回退为“未连接”，
+      // 避免树与状态栏继续显示“已连接”导致后续操作反复报错
+      const invalidConnection = connections.get(connId)
+      if (invalidConnection && isConnectionInvalidError(error)) {
+        resetInvalidConnection(invalidConnection)
+      } else {
+        message.error(`加载数据库列表失败: ${detail}`)
+      }
     } finally {
       setConnectionDatabasesLoading(previous => {
         const next = new Set(previous)
@@ -876,12 +1018,60 @@ function App() {
     )
   }
 
-  const loadDatabaseObjects = async (connId: string, database: string) => {
+  const loadDatabaseObjects = async (
+    connId: string,
+    database: string,
+    options?: { force?: boolean },
+  ) => {
+    const force = options?.force === true
     const requestSequence = ++databaseObjectLoadSequence.current
     const loadTarget = `database:${connId}:${database}`
     databaseObjectLoadTarget.current = loadTarget
-    const emptyObjects = createEmptyDatabaseObjects()
-    setDatabaseObjects(emptyObjects)
+
+    // 缓存命中且非强制刷新：先用缓存秒开树与面板，后台异步刷新
+    const cachedSummaries = force ? undefined : getCachedTableSummaries(connId, database)
+    if (cachedSummaries && cachedSummaries.length > 0) {
+      const cachedTables = [...new Set(cachedSummaries.map(item => item.name))]
+      const cachedObjects: DatabaseObjects = {
+        tables: cachedTables,
+        views: [],
+        functions: [],
+        procedures: [],
+        events: [],
+        queries: [],
+        reports: [],
+        backups: [],
+      }
+      setDatabaseObjects(cachedObjects)
+      setTableSummaries(cachedSummaries)
+      setTableSummariesError('')
+      setDatabaseObjectsLoading(false)
+      const groups = loadDatabaseObjectGroups(connId, database)
+      const cachedChildren = buildDatabaseObjectTree(
+        connId,
+        database,
+        cachedObjects,
+        groups,
+        [],
+      )
+      setTreeData(previous => updateConnectionTreeNode(
+        previous,
+        item => item.type === 'database'
+          && item.connId === connId
+          && item.database === database,
+        item => ({ ...item, children: cachedChildren }),
+      ))
+      void window.logger.write(
+        'info',
+        'ObjectWorkspace',
+        `命中表清单缓存秒开: 连接=${connId}, 数据库=${database}, 表=${cachedTables.length}`,
+      )
+      // 后台异步刷新（不阻塞 UI）；不预清空，避免界面闪烁
+      void refreshDatabaseObjectsFromIPC(connId, database, requestSequence, false)
+      return
+    }
+
+    setDatabaseObjects(createEmptyDatabaseObjects())
     setDatabaseBackupRecords([])
     setTableSummaries([])
     setTableSummariesError('')
@@ -894,15 +1084,37 @@ function App() {
       item => ({
         ...item,
         // 数据请求返回前先创建固定分类，避免显示上一个数据库的对象。
-        children: buildDatabaseObjectTree(connId, database, emptyObjects),
+        children: buildDatabaseObjectTree(connId, database, createEmptyDatabaseObjects()),
       }),
     ))
     void window.logger.write(
       'info',
       'ObjectWorkspace',
-      `开始加载数据库对象: 连接=${connId}, 数据库=${database}, 序号=${requestSequence}`,
+      `开始加载数据库对象: 连接=${connId}, 数据库=${database}, 序号=${requestSequence}, 强制=${force}`,
     )
 
+    // 未命中或强制：走完整 IPC 加载
+    await refreshDatabaseObjectsFromIPC(connId, database, requestSequence, true)
+  }
+
+  /**
+   * 走 IPC 全量加载数据库对象并落地（缓存 + state + tree）。
+   * 仅在请求序号仍为最新时落地，避免覆盖更新的请求。
+   * @param clearFirst 是否在请求前清空对象（命中缓存秒开后台刷新场景传 false）
+   */
+  const refreshDatabaseObjectsFromIPC = async (
+    connId: string,
+    database: string,
+    requestSequence: number,
+    clearFirst: boolean,
+  ) => {
+    if (clearFirst) {
+      setDatabaseObjects(createEmptyDatabaseObjects())
+      setDatabaseBackupRecords([])
+      setTableSummaries([])
+      setTableSummariesError('')
+      setDatabaseObjectsLoading(true)
+    }
     try {
       const [
         tableSummariesResult,
@@ -924,7 +1136,7 @@ function App() {
         label: string,
       ): string[] => {
         if (!result?.success) {
-          throw new Error(result?.error?.message || `${label}加载失败`)
+          throw responseError(result || {}, `${label}加载失败`)
         }
         const source = Array.isArray(result.data) ? result.data : []
         const normalized = source.flatMap(value => (
@@ -945,9 +1157,7 @@ function App() {
         return values
       }
       if (!tableSummariesResult?.success) {
-        throw new Error(
-          tableSummariesResult?.error?.message || '表明细加载失败',
-        )
+        throw responseError(tableSummariesResult || {}, '表明细加载失败')
       }
       const summaries = (tableSummariesResult.data || []).filter(item => (
         item
@@ -960,9 +1170,7 @@ function App() {
       const procedures = readList(proceduresResult, '存储过程列表')
       const events = readList(eventsResult, '事件列表')
       if (!backupsResult?.success) {
-        throw new Error(
-          backupsResult?.error?.message || '备份记录加载失败',
-        )
+        throw responseError(backupsResult || {}, '备份记录加载失败')
       }
       const backups = (backupsResult.data || []).filter(record => (
         typeof record?.id === 'string'
@@ -993,6 +1201,8 @@ function App() {
       setTableSummariesError('')
       setDatabaseBackupRecords(backups)
       setDatabaseObjectsLoading(false)
+      // 写入缓存：供下次切换秒开
+      setCachedTableSummaries(connId, database, summaries)
       const groups = loadDatabaseObjectGroups(connId, database)
       const children = buildDatabaseObjectTree(
         connId,
@@ -1035,7 +1245,13 @@ function App() {
         'ObjectWorkspace',
         `加载数据库对象失败: 连接=${connId}, 数据库=${database}, 原因=${detail}`,
       )
-      message.error(`加载数据库对象失败: ${detail}`)
+      // 连接已失效时同步复位连接状态，并提示重新连接
+      const invalidConnection = connections.get(connId)
+      if (invalidConnection && isConnectionInvalidError(error)) {
+        resetInvalidConnection(invalidConnection)
+      } else {
+        message.error(`加载数据库对象失败: ${detail}`)
+      }
     }
   }
 
@@ -1558,6 +1774,8 @@ function App() {
         item => ({ ...item, children: undefined }),
       ))
       clearConnectionContext(connection.id)
+      // 断开连接后清掉该连接的所有缓存（表清单 + 表元数据），避免重连时读到陈旧数据
+      clearObjectCacheConnection(connection.id)
       void window.logger.write(
         'info',
         'ConnectionWorkspace',
@@ -1828,6 +2046,11 @@ function App() {
     database: string,
     tableName: string,
   ): Promise<TableMetadata> => {
+    // 命中缓存直接返回，避免来回切换表时反复拉 metadata
+    const cached = getCachedTableMetadata(connId, database, tableName)
+    if (cached) {
+      return cached
+    }
     void window.logger.write(
       'info',
       'TableStructure',
@@ -1851,6 +2074,8 @@ function App() {
         'TableStructure',
         `表内部结构加载完成: 数据库=${database}, 表=${tableName}, 字段=${result.data.fields.length}, 索引=${result.data.indexes.length}, 外键=${result.data.foreign_keys.length}, DDL=${result.data.ddl ? '有' : '无'}`,
       )
+      // 写入缓存，下次切换回该表秒出
+      setCachedTableMetadata(connId, database, tableName, result.data)
       return result.data
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
@@ -1970,9 +2195,23 @@ function App() {
         ...selectedDatabase,
         tableName: result.data.tableName,
       })
+      // 保存表结构后：失效旧表名 metadata（重命名场景），并清整库 metadata（字段/索引可能变化）
+      if (request.originalName && request.originalName !== result.data.tableName) {
+        clearObjectCacheTableMetadata(
+          selectedDatabase.connId,
+          selectedDatabase.database,
+          request.originalName,
+        )
+      }
+      clearObjectCacheTableMetadata(
+        selectedDatabase.connId,
+        selectedDatabase.database,
+        result.data.tableName,
+      )
       await loadDatabaseObjects(
         selectedDatabase.connId,
         selectedDatabase.database,
+        { force: true },
       )
       setTableStructureRevision(value => value + 1)
       void window.logger.write(
@@ -2038,7 +2277,9 @@ function App() {
           closeTableDataDocuments(context.connId, context.database, tableName)
           setSelectedObject(null)
           setSelectedTable(null)
-          await loadDatabaseObjects(context.connId, context.database)
+          // 删除表后：清掉该表 metadata 缓存，避免下次重名建表时命中陈旧元数据
+          clearObjectCacheTableMetadata(context.connId, context.database, tableName)
+          await loadDatabaseObjects(context.connId, context.database, { force: true })
           void window.logger.write(
             'info',
             'TableObjectMenu',
@@ -2855,9 +3096,12 @@ function App() {
 
   const handleRefresh = async () => {
     if (selectedDatabase && activeConnections.has(selectedDatabase.connId)) {
+      // 强制刷新：清掉该库所有缓存（含表 metadata），再用 force 重拉覆盖
+      clearObjectCacheDatabase(selectedDatabase.connId, selectedDatabase.database)
       await loadDatabaseObjects(
         selectedDatabase.connId,
         selectedDatabase.database,
+        { force: true },
       )
       return
     }
@@ -3045,10 +3289,83 @@ function App() {
     await loadDatabaseObjects(context.connection.id, context.database)
   }
 
+  /**
+   * 打开 TDSQL 集群监控面板
+   *
+   * 仅 TDSQL 类型连接支持，由右键菜单触发。打开后会隐藏普通工作区，
+   * 显示会话列表、DDL 任务、分片分布三个子面板。
+   */
+  const openClusterMonitor = async (connection: ConnectionData) => {
+    if (connection.type !== 'TDSQL') {
+      message.warning('集群监控仅支持 TDSQL 连接')
+      return
+    }
+    if (!activeConnections.has(connection.id)) {
+      message.warning('请先建立连接')
+      return
+    }
+    setSelectedConnection(connection)
+    setClusterMonitorConnection(connection)
+    // 重置表列表，触发后续按需加载
+    setMonitorTables([])
+    void window.logger.write(
+      'info',
+      'TDSQLMonitor',
+      `打开集群监控面板: 连接=${connection.id}, 默认数据库=${connection.database || '未指定'}`,
+    )
+  }
+
+  /**
+   * 为监控面板加载指定数据库下的表列表
+   *
+   * 分片分布子面板需要表名作为下拉选项，独立于左侧树的加载逻辑。
+   * 使用 useCallback 保持引用稳定：子面板 effect 依赖本回调，
+   * 若每次渲染都产生新引用会导致 effect 反复触发、形成请求风暴。
+   */
+  const loadMonitorTables = useCallback(async (database: string) => {
+    const connId = clusterMonitorConnection?.id
+    if (!connId || !database) return
+    // 序号机制：仅最后一次请求允许落地结果，快速切库时旧响应直接丢弃
+    const seq = ++monitorTablesSeqRef.current
+    setMonitorTablesLoading(true)
+    try {
+      const result = await window.database.getTables(connId, database)
+      if (seq !== monitorTablesSeqRef.current) return
+      if (!result.success || !result.data) {
+        throw new Error(
+          result.error?.detail
+          || result.error?.message
+          || '加载表列表失败',
+        )
+      }
+      setMonitorTables(result.data)
+      void window.logger.write(
+        'info',
+        'TDSQLMonitor',
+        `监控面板表列表已加载: 连接=${connId}, 数据库=${database}, 表数=${result.data.length}`,
+      )
+    } catch (error) {
+      if (seq !== monitorTablesSeqRef.current) return
+      const detail = error instanceof Error ? error.message : String(error)
+      setMonitorTables([])
+      void window.logger.write(
+        'error',
+        'TDSQLMonitor',
+        `监控面板表列表加载失败: 连接=${connId}, 数据库=${database}, 原因=${detail}`,
+      )
+      message.error(`加载表列表失败：${detail}`)
+    } finally {
+      if (seq === monitorTablesSeqRef.current) {
+        setMonitorTablesLoading(false)
+      }
+    }
+  }, [clusterMonitorConnection])
+
   const databaseActions = useDatabaseActions({
     documents,
     closeDocumentSafely,
     onDisconnect: disconnectConnection,
+    onConnectionInvalid: resetInvalidConnection,
     onUnload: unloadDatabaseWorkspace,
     onRenamed: async (context, nextName) => {
       await loadDatabases(context.connection.id)
@@ -3372,6 +3689,23 @@ function App() {
         setShowAutomation(true)
         void window.logger.write('info', 'Automation', '打开自动运行配置对话框')
       },
+      editDocument: (action: EditorActionId) => {
+        // 将命令系统分发的编辑动作路由到当前活动查询文档对应的 Monaco 编辑器
+        const targetId = activeDocument?.kind === 'query' ? activeDocument.id : activeTabId
+        const executed = executeEditorAction(targetId, action)
+        // 未找到编辑器时提示，避免执行无声失败
+        void executed.then(success => {
+          if (!success) {
+            const labelMap: Record<EditorActionId, string> = {
+              undo: '撤销',
+              redo: '重做',
+              find: '查找',
+              replace: '替换',
+            }
+            message.warning(`${labelMap[action]}：当前没有可编辑的查询文档`)
+          }
+        })
+      },
       closeCurrent: async () => {
         if (activeTabId) await closeDocumentSafely(activeTabId)
       },
@@ -3423,6 +3757,8 @@ function App() {
         && activeDocument.capabilities.supportsCancel,
       ),
       canSaveSqlFile: activeDocument?.kind === 'query',
+      /** 是否存在可接收编辑命令的活动 Monaco 编辑器：仅限查询文档 */
+      canEditDocument: activeDocument?.kind === 'query',
       canShowObjects: Boolean(activeSelectedDatabase),
       canUseDatabaseTools: connections.size > 0,
       canFavoriteCurrent: Boolean(
@@ -3539,135 +3875,164 @@ function App() {
             onNewGroup={() => setGroupDialog({ open: true })}
             onEditGroup={group => setGroupDialog({ open: true, group })}
             onDeleteGroup={deleteConnectionGroup}
+            onOpenClusterMonitor={connection => {
+              void openClusterMonitor(connection)
+            }}
           />
 
-          <WorkspaceHost
-            documents={documents}
-            activeDocumentId={activeTabId}
-            surface={surface}
-            onActivate={activateDocument}
-            onClose={(documentId) => {
-              void closeDocumentSafely(documentId)
-            }}
-            onExecuteQuery={executeSQL}
-            onCancelQuery={cancelQuery}
-            onChangeQueryContext={changeQueryContext}
-            onQueryTransaction={runQueryTransaction}
-            onUpdateQuery={updateQuery}
-            activeConnections={activeConnections}
-            connections={connections}
-            selectedConnection={selectedConnection}
-            selectedDatabase={selectedDatabase}
-            connectionDatabases={selectedConnection
-              ? connectionDatabases.get(selectedConnection.id) || []
-              : []}
-            connectionDatabasesLoading={Boolean(
-              selectedConnection
-              && connectionDatabasesLoading.has(selectedConnection.id)
-            )}
-            objectCategory={objectCategory}
-            databaseObjects={databaseObjects}
-            tableSummaries={tableSummaries}
-            tableSummariesError={tableSummariesError}
-            databaseBackupRecords={databaseBackupRecords}
-            databaseBackupVerification={backupActions.verification}
-            databaseObjectsLoading={databaseObjectsLoading}
-            selectedObject={selectedObject}
-            onSelectObject={handleSelectDatabaseObject}
-            onOpenDatabase={database => {
-              if (!selectedConnection) return
-              void window.logger.write(
-                'info',
-                'ConnectionWorkspace',
-                `双击内容区数据库并进入表列表: 连接=${selectedConnection.id}, 数据库=${database}`,
-              )
-              void handleTreeSelect(
-                `database:${selectedConnection.id}:${database}`,
-              )
-            }}
-            onRefreshConnectionDatabases={() => {
-              if (selectedConnection) {
-                void loadDatabases(selectedConnection.id)
+          {clusterMonitorConnection ? (
+            <TDSQLMonitorPanel
+              connection={clusterMonitorConnection}
+              databases={
+                connectionDatabases.get(clusterMonitorConnection.id)
+                  ?.map(item => item.name) || []
               }
-            }}
-            onRefreshTableSummaries={() => {
-              if (selectedDatabase) {
-                void loadDatabaseObjects(
-                  selectedDatabase.connId,
-                  selectedDatabase.database,
+              tables={monitorTables}
+              tablesLoading={monitorTablesLoading}
+              onLoadTables={loadMonitorTables}
+              onClose={() => {
+                void window.logger.write(
+                  'info',
+                  'TDSQLMonitor',
+                  `关闭集群监控面板: 连接=${clusterMonitorConnection.id}`,
                 )
-              }
-            }}
-            onOpenObject={handleOpenObjectTable}
-            onTableAction={handleTableAction}
-            onObjectAction={handleObjectAction}
-            onLoadData={(documentId, page, pageSize, query) => {
-              const document = documents.find(
-                item => item.id === documentId && item.kind === 'data',
-              )
-              if (document?.kind === 'data') {
-                void loadTableData(
-                  document.id,
-                  document.connId,
-                  document.database,
-                  document.objectName,
-                  page,
-                  pageSize,
-                  query,
-                )
-              }
-            }}
-            onCommitData={commitTableData}
-            onDirtyData={(documentId, dirty) => {
-              updateData(documentId, { dirty })
-            }}
-            onExportData={(connId, database, tableName) => {
-              void openTableExportDialog(connId, database, 'table', [tableName])
-                .catch(error => {
-                  const detail = error instanceof Error
-                    ? error.message
-                    : String(error)
-                  void window.logger.write(
-                    'error',
-                    'TableTransfer',
-                    `打开数据工作区导出向导失败: 数据库=${database}, 表=${tableName}, 原因=${detail}`,
-                  )
-                  message.error(`打开导出向导失败：${detail}`)
-                })
-            }}
-            onLoadTableMetadata={loadTableMetadata}
-            tableStructureRevision={tableStructureRevision}
-            onNewQuery={() => {
-              void commands.execute('query.new')
-            }}
-            onUnavailable={notifyUnavailable}
-          />
-
-          {showDetails && (
-            <RightPanel
-              selectedTable={selectedTable}
-              onLoadMetadata={loadTableMetadata}
-              onInsertSQL={(sql) => {
-                if (activeSelectedDatabase) {
-                  openQueryTab(
-                    activeSelectedDatabase.connId,
-                    activeSelectedDatabase.database,
-                    sql,
-                  )
-                } else if (activeSelectedConnection) {
-                  openQueryTab(
-                    activeSelectedConnection.id,
-                    activeSelectedConnection.database || '',
-                    sql,
-                  )
-                } else if (queryTabs.length > 0) {
-                  const activeTab = queryTabs.find(t => t.id === activeTabId)
-                  if (activeTab) {
-                    updateQuery(activeTabId, { sql, dirty: true })
-                  }
-                }
+                setClusterMonitorConnection(null)
+                setMonitorTables([])
+                // 关闭面板后回到对象浏览视图
+                showObjects()
               }}
             />
+          ) : (
+            <>
+              <WorkspaceHost
+                documents={documents}
+                activeDocumentId={activeTabId}
+                surface={surface}
+                onActivate={activateDocument}
+                onClose={(documentId) => {
+                  void closeDocumentSafely(documentId)
+                }}
+                onExecuteQuery={executeSQL}
+                onCancelQuery={cancelQuery}
+                onChangeQueryContext={changeQueryContext}
+                onQueryTransaction={runQueryTransaction}
+                onUpdateQuery={updateQuery}
+                activeConnections={activeConnections}
+                connections={connections}
+                selectedConnection={selectedConnection}
+                selectedDatabase={selectedDatabase}
+                connectionDatabases={selectedConnection
+                  ? connectionDatabases.get(selectedConnection.id) || []
+                  : []}
+                connectionDatabasesLoading={Boolean(
+                  selectedConnection
+                  && connectionDatabasesLoading.has(selectedConnection.id)
+                )}
+                objectCategory={objectCategory}
+                databaseObjects={databaseObjects}
+                tableSummaries={tableSummaries}
+                tableSummariesError={tableSummariesError}
+                databaseBackupRecords={databaseBackupRecords}
+                databaseBackupVerification={backupActions.verification}
+                databaseObjectsLoading={databaseObjectsLoading}
+                selectedObject={selectedObject}
+                onSelectObject={handleSelectDatabaseObject}
+                onOpenDatabase={database => {
+                  if (!selectedConnection) return
+                  void window.logger.write(
+                    'info',
+                    'ConnectionWorkspace',
+                    `双击内容区数据库并进入表列表: 连接=${selectedConnection.id}, 数据库=${database}`,
+                  )
+                  void handleTreeSelect(
+                    `database:${selectedConnection.id}:${database}`,
+                  )
+                }}
+                onRefreshConnectionDatabases={() => {
+                  if (selectedConnection) {
+                    void loadDatabases(selectedConnection.id)
+                  }
+                }}
+                onRefreshTableSummaries={() => {
+                  if (selectedDatabase) {
+                    void loadDatabaseObjects(
+                      selectedDatabase.connId,
+                      selectedDatabase.database,
+                    )
+                  }
+                }}
+                onOpenObject={handleOpenObjectTable}
+                onTableAction={handleTableAction}
+                onObjectAction={handleObjectAction}
+                onLoadData={(documentId, page, pageSize, query) => {
+                  const document = documents.find(
+                    item => item.id === documentId && item.kind === 'data',
+                  )
+                  if (document?.kind === 'data') {
+                    void loadTableData(
+                      document.id,
+                      document.connId,
+                      document.database,
+                      document.objectName,
+                      page,
+                      pageSize,
+                      query,
+                    )
+                  }
+                }}
+                onCommitData={commitTableData}
+                onDirtyData={(documentId, dirty) => {
+                  updateData(documentId, { dirty })
+                }}
+                onExportData={(connId, database, tableName) => {
+                  void openTableExportDialog(connId, database, 'table', [tableName])
+                    .catch(error => {
+                      const detail = error instanceof Error
+                        ? error.message
+                        : String(error)
+                      void window.logger.write(
+                        'error',
+                        'TableTransfer',
+                        `打开数据工作区导出向导失败: 数据库=${database}, 表=${tableName}, 原因=${detail}`,
+                      )
+                      message.error(`打开导出向导失败：${detail}`)
+                    })
+                }}
+                onLoadTableMetadata={loadTableMetadata}
+                tableStructureRevision={tableStructureRevision}
+                onNewQuery={() => {
+                  void commands.execute('query.new')
+                }}
+                onUnavailable={notifyUnavailable}
+              />
+
+              {showDetails && (
+                <RightPanel
+                  selectedTable={selectedTable}
+                  onLoadMetadata={loadTableMetadata}
+                  onInsertSQL={(sql) => {
+                    if (activeSelectedDatabase) {
+                      openQueryTab(
+                        activeSelectedDatabase.connId,
+                        activeSelectedDatabase.database,
+                        sql,
+                      )
+                    } else if (activeSelectedConnection) {
+                      openQueryTab(
+                        activeSelectedConnection.id,
+                        activeSelectedConnection.database || '',
+                        sql,
+                      )
+                    } else if (queryTabs.length > 0) {
+                      const activeTab = queryTabs.find(t => t.id === activeTabId)
+                      if (activeTab) {
+                        updateQuery(activeTabId, { sql, dirty: true })
+                      }
+                    }
+                  }}
+                />
+              )}
+            </>
           )}
         </Layout>
       </Content>
@@ -3898,7 +4263,6 @@ function App() {
       <AboutDialog open={showAbout} onClose={() => setShowAbout(false)} />
       <ChangelogDialog
         open={showChangelog}
-        currentVersion="v1.0.0"
         onClose={() => setShowChangelog(false)}
       />
       <FavoriteDialog
