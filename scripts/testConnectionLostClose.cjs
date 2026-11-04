@@ -156,10 +156,51 @@ async function testManagerCloseFlow() {
   }
 }
 
+/**
+ * M1：连接/断开竞态。
+ * “发起连接后立刻断开”时，disconnect 必须先等待在途建连结束再清理，
+ * 否则建连完成后会残留一条没有 UI 归属的活连接。
+ */
+async function testConnectThenImmediateDisconnect() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sqltool-race-'))
+  const manager = new ConnectionManager(path.join(root, 'user-data'))
+  const databaseFile = path.join(root, 'race.sqlite')
+
+  try {
+    const catalog = manager.createSavedConnection(sqliteDraft(databaseFile, {
+      name: '连接断开竞态回归测试',
+    }))
+    const connectionId = catalog.connections[0].id
+
+    // 不等待建连结束，立刻触发断开
+    const connecting = manager.connect(connectionId)
+    const disconnecting = manager.disconnect(connectionId)
+    await Promise.allSettled([connecting, disconnecting])
+
+    assert.equal(
+      manager.connections.has(connectionId),
+      false,
+      '连接后立即断开不能残留活动连接',
+    )
+    assert.equal(manager.connections.size, 0, '连接后立即断开应清空注册表')
+    assert.equal(
+      manager.connectingPromises.size,
+      0,
+      '建连流程结束后不应残留进行中的建连记录',
+    )
+
+    console.log('[连接断开竞态回归测试] 通过')
+  } finally {
+    await manager.closeAll()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+}
+
 async function main() {
   await testPostgresClose()
   await testMysqlClose()
   await testManagerCloseFlow()
+  await testConnectThenImmediateDisconnect()
 }
 
 main().catch(error => {

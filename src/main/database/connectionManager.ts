@@ -271,7 +271,8 @@ export class ConnectionManager {
           'ConnectionManager',
           `连接已存在，先关闭旧会话: ${connData.name}, ID: ${connData.id}`,
         )
-        await this.disconnect(connData.id)
+        // 当前正处于建连流程内部，等待自身会死锁，因此跳过等待进行中的建连
+        await this.disconnect(connData.id, false)
       }
       const adapter = getAdapter(connData.type)
       logger.debug('ConnectionManager', `使用适配器: ${connData.type}Adapter`)
@@ -326,7 +327,23 @@ export class ConnectionManager {
     )
   }
 
-  async disconnect(connId: string): Promise<void> {
+  async disconnect(connId: string, waitForConnecting = true): Promise<void> {
+    // M1：若该连接仍在建立中，先等待建连结束再清理。
+    // 否则“连接→立刻断开”时这里会提前返回，等建连完成后又留下一条没有 UI 归属的活连接。
+    // 建连流程内部调用本方法时传 false，避免等待自己造成死锁。
+    const connecting = waitForConnecting ? this.connectingPromises.get(connId) : undefined
+    if (connecting) {
+      logger.info('ConnectionManager', `断开连接前等待进行中的建连流程结束: ID=${connId}`)
+      try {
+        await connecting
+      } catch (error) {
+        // 建连失败由 connect 的调用方处理，这里只记录不影响后续清理
+        logger.warn(
+          'ConnectionManager',
+          `等待建连流程结束时出现异常(已忽略): ID=${connId}, 原因=${(error as Error)?.message || String(error)}`,
+        )
+      }
+    }
     const activeConn = this.connections.get(connId)
     if (!activeConn) {
       logger.warn('ConnectionManager', `断开连接失败: 连接ID ${connId} 不存在`)
