@@ -8,6 +8,7 @@ import type {
   DatabaseCollationOption,
   DatabaseEncodingCatalog,
 } from './databaseManagementTypes'
+import { isMySQLCompatible } from './mysqlCompat'
 
 function rowsOf(result: ExecuteResult): Record<string, unknown>[] {
   if (!result.success) {
@@ -50,7 +51,7 @@ export async function loadDatabaseEncodingCatalog(
   connection: unknown,
   database?: string,
 ): Promise<DatabaseEncodingCatalog> {
-  if (connectionData.type !== 'MySQL') {
+  if (!isMySQLCompatible(connectionData.type)) {
     return { charsets: [], collations: [] }
   }
 

@@ -10,6 +10,7 @@ export function createQueryExecutor(
 ): QueryExecutor {
   switch (type) {
     case 'MySQL':
+    case 'TDSQL':
       return new MySQLQueryExecutor()
     case 'PostgreSQL':
       return new PostgreSQLQueryExecutor()

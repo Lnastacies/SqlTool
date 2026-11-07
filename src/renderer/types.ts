@@ -1,4 +1,4 @@
-export type DatabaseType = 'MySQL' | 'PostgreSQL' | 'SQL Server' | 'SQLite'
+export type DatabaseType = 'MySQL' | 'PostgreSQL' | 'SQL Server' | 'SQLite' | 'TDSQL'
 
 export interface ConnectionData {
   id: string
@@ -78,6 +78,8 @@ export interface DatabaseSummary {
 
 export interface CloseDatabaseResult {
   name: string
+  /** 关闭时检测到连接已失效并已剔除，渲染层需把连接回退为“未连接” */
+  connectionInvalidated?: boolean
 }
 
 export interface DropDatabaseResult {
@@ -329,6 +331,11 @@ export interface TableDefinition {
 export interface SaveTableStructureRequest {
   originalName?: string
   definition: TableDefinition
+  /** TDSQL 建表选项，仅 databaseType === 'TDSQL' 时使用 */
+  tdsqlOptions?: {
+    tableType: 'shard' | 'noshard' | 'broadcast'
+    shardKey?: string
+  }
 }
 
 export interface TableStructurePlan {

@@ -185,6 +185,7 @@ const SQLITE_TYPES: TableDataTypeOption[] = [
 export const TABLE_DATA_TYPE_OPTIONS:
 Record<DatabaseType, TableDataTypeOption[]> = {
   MySQL: MYSQL_TYPES,
+  TDSQL: MYSQL_TYPES,
   PostgreSQL: POSTGRES_TYPES,
   'SQL Server': SQL_SERVER_TYPES,
   SQLite: SQLITE_TYPES,

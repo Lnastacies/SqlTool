@@ -95,6 +95,9 @@ export type IPCChannel =
   | 'logger:getLogContent'
   | 'logger:clearLogs'
   | 'logger:write'
+  | 'tdsql:getTableMetadata'
+  | 'tdsql:getSessions'
+  | 'tdsql:getDdlTasks'
 
 export interface IPCResponse<T = any> {
   success: boolean

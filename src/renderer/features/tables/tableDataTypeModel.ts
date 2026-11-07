@@ -1,4 +1,5 @@
 import type { DatabaseType } from '../../types'
+import { isMySQLCompatible } from '../mysqlCompat'
 import {
   findTableDataTypeOption,
   type TableDataTypeOption,
@@ -101,8 +102,8 @@ export function formatTableDataType(
       : `(${parsed.argument})`
   }
 
-  if (databaseType === 'MySQL' && parsed.unsigned) type += ' UNSIGNED'
-  if (databaseType === 'MySQL' && parsed.zerofill) type += ' ZEROFILL'
+  if (isMySQLCompatible(databaseType) && parsed.unsigned) type += ' UNSIGNED'
+  if (isMySQLCompatible(databaseType) && parsed.zerofill) type += ' ZEROFILL'
   return type
 }
 

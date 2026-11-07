@@ -145,8 +145,31 @@ export function validateTableStructureRequest(
   validateFields(databaseType, request.definition)
   validateRelations(request.definition)
 
+  // 归一化 TDSQL 建表选项
+  const tdsqlOptions = request.tdsqlOptions && {
+    tableType: request.tdsqlOptions.tableType,
+    shardKey: request.tdsqlOptions.shardKey?.trim() || undefined,
+  }
+
+  // TDSQL 新建分表必须指定存在的 SHARDKEY 字段，避免静默建成单表。
+  // 编辑表（originalName 存在）不支持变更分片属性，前端不会下发该选项。
+  if (databaseType === 'TDSQL' && !request.originalName && tdsqlOptions) {
+    if (tdsqlOptions.tableType === 'shard') {
+      if (!tdsqlOptions.shardKey) {
+        throw new Error('TDSQL 分表必须指定 SHARDKEY 分片键')
+      }
+      const fieldNames = new Set(
+        request.definition.fields.map(field => normalizeName(field.name)),
+      )
+      if (!fieldNames.has(normalizeName(tdsqlOptions.shardKey))) {
+        throw new Error(`SHARDKEY 分片键字段“${tdsqlOptions.shardKey}”不存在`)
+      }
+    }
+  }
+
   return {
     originalName: request.originalName?.trim(),
+    tdsqlOptions,
     definition: {
       name: request.definition.name.trim(),
       primaryKeyName: request.definition.primaryKeyName?.trim() || undefined,

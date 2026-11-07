@@ -1,7 +1,7 @@
 # SQLTool
 
 SQLTool 是一款基于 Electron、React 和 TypeScript 的桌面数据库管理工具，支持
-MySQL、PostgreSQL、SQL Server 和 SQLite。
+MySQL、PostgreSQL、SQL Server、SQLite 和 TDSQL（腾讯分布式数据库）。
 
 ## 主要功能
 

@@ -16,6 +16,7 @@ import {
 import DeleteOutlined from '@ant-design/icons/DeleteOutlined'
 import PlusOutlined from '@ant-design/icons/PlusOutlined'
 import type { ConnectionData } from '../../types'
+import { isMySQLCompatible } from '../mysqlCompat'
 
 interface UserManagementDialogProps {
   connection: ConnectionData
@@ -336,7 +337,7 @@ export default function UserManagementDialog({
           >
             <Input placeholder="输入用户名" autoFocus />
           </Form.Item>
-          {connection.type === 'MySQL' && (
+          {isMySQLCompatible(connection.type) && (
             <Form.Item name="host" label="主机">
               <Input placeholder="允许连接的主机，默认 %" />
             </Form.Item>

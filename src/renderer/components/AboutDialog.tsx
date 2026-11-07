@@ -23,8 +23,8 @@ interface AboutDialogProps {
 // 默认应用信息（IPC 获取失败时的兜底值）
 const DEFAULT_APP_INFO: AppInfo = {
   productName: 'SQLTool',
-  version: '1.0.0',
-  description: 'Navicat 风格的数据库管理工具，支持 MySQL、PostgreSQL、SQL Server、SQLite',
+  version: '1.1.4',
+  description: 'Navicat 风格的数据库管理工具，支持 MySQL、PostgreSQL、SQL Server、SQLite、TDSQL',
   author: 'Locus',
   company: 'ADTEC-先进数通',
   authorEmail: '1656113@163.com',

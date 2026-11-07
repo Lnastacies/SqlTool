@@ -450,3 +450,13 @@ contextBridge.exposeInMainWorld('logger', {
   write: (level: 'info' | 'warn' | 'error', module: string, message: string) =>
     ipcRenderer.invoke('logger:write', level, module, message),
 })
+
+// TDSQL 分布式数据库 IPC 暴露
+contextBridge.exposeInMainWorld('tdsql', {
+  getTableMetadata: (connId: string, database: string, tableName: string) =>
+    ipcRenderer.invoke('tdsql:getTableMetadata', connId, database, tableName),
+  getSessions: (connId: string) =>
+    ipcRenderer.invoke('tdsql:getSessions', connId),
+  getDdlTasks: (connId: string) =>
+    ipcRenderer.invoke('tdsql:getDdlTasks', connId),
+})

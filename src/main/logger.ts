@@ -1,6 +1,8 @@
 import * as fs from 'fs'
 import * as path from 'path'
 
+const { app } = require('electron')
+
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export interface LogConfig {
@@ -18,27 +20,51 @@ export interface LogEntry {
   error?: Error
 }
 
+/**
+ * 获取默认日志目录。
+ * 打包后 __dirname 位于 app.asar（只读虚拟文件）内，mkdir 会抛 ENOTDIR，
+ * 因此打包环境写入 userData/logs；开发与纯 Node 测试脚本保持项目 logs 目录。
+ */
+function getDefaultLogDir(): string {
+  try {
+    // 纯 Node 环境下 require('electron') 返回字符串，app 为 undefined，直接走回退
+    if (app && (app as { isPackaged?: boolean }).isPackaged) {
+      return path.join(app.getPath('userData'), 'logs')
+    }
+  } catch {
+    // app 未就绪等异常场景统一回退，绝不让日志模块影响启动
+  }
+  return path.join(__dirname, '../../logs')
+}
+
 export class Logger {
   private config: LogConfig
   private currentFile: string
   private currentSize: number = 0
+  private logDirReady = false
 
   constructor(config?: Partial<LogConfig>) {
     this.config = {
       logLevel: config?.logLevel || 'info',
       maxFileSize: config?.maxFileSize || 10 * 1024 * 1024,
       maxFiles: config?.maxFiles || 10,
-      logDir: config?.logDir || path.join(__dirname, '../../logs')
+      logDir: config?.logDir || getDefaultLogDir()
     }
 
-    this.ensureLogDir()
     this.currentFile = this.getLogFileName()
     this.currentSize = this.getCurrentFileSize()
   }
 
   private ensureLogDir(): void {
-    if (!fs.existsSync(this.config.logDir)) {
-      fs.mkdirSync(this.config.logDir, { recursive: true })
+    if (this.logDirReady) return
+    try {
+      if (!fs.existsSync(this.config.logDir)) {
+        fs.mkdirSync(this.config.logDir, { recursive: true })
+      }
+      this.logDirReady = true
+    } catch (err) {
+      // 目录创建失败时静默降级为仅控制台输出，避免日志模块导致应用启动崩溃
+      console.error(`[Logger] 日志目录不可用，已降级为控制台输出: ${this.config.logDir}`, err)
     }
   }
 
@@ -150,6 +176,10 @@ export class Logger {
       console.log(logStr.trim())
     }
 
+    // 延迟创建目录：首次写日志时才确保目录存在，避免构造函数阻塞启动流程
+    this.ensureLogDir()
+    if (!this.logDirReady) return
+
     try {
       if (this.shouldRotate()) {
         this.rotate()
@@ -163,6 +193,8 @@ export class Logger {
   }
 
   getLogFiles(): string[] {
+    // 目录可能尚未创建（延迟初始化），读取前判空
+    if (!fs.existsSync(this.config.logDir)) return []
     return fs.readdirSync(this.config.logDir)
       .filter(f => f.startsWith('sqltool_') && f.endsWith('.log'))
       .sort((a, b) => b.localeCompare(a))

@@ -2,22 +2,19 @@ import { dialog } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { logger } from '../logger'
-import {
-  exportRowsChunk,
-} from './tableTransferFormat'
 import { buildStructureResetSql } from './databaseDumpSql'
 import {
   replaceExportFile,
 } from './tableTransferService'
 import {
-  TABLE_EXPORT_PAGE_SIZE,
-} from './tableTransferTypes'
-import {
   buildDropObjectSql,
   foreignKeyGuardSql,
   formatObjectDdl,
 } from './databaseBackupSql'
-import { backupTableDataSql } from './databaseBackupDataSql'
+import {
+  backupInsertRowsSql,
+  backupTableDataSql,
+} from './databaseBackupDataSql'
 import {
   buildDatabaseBackupTableSql,
 } from './databaseBackupTableSql'
@@ -32,17 +29,14 @@ import type {
   DatabaseModelTable,
 } from './databaseManagementTypes'
 
-interface DatabaseDumpPage {
-  rows: Record<string, unknown>[]
+// 备份/转储的表数据来源：按批流式读取，避免 UI 分页接口的重复元数据查询
+export interface DatabaseDumpTableSource {
   total: number
+  readNext: () => Promise<Record<string, unknown>[]>
 }
 
 interface DatabaseDumpSource {
-  loadPage: (
-    table: DatabaseModelTable,
-    page: number,
-    pageSize: number,
-  ) => Promise<DatabaseDumpPage>
+  openTable: (table: DatabaseModelTable) => Promise<DatabaseDumpTableSource>
 }
 
 export interface DatabaseDumpWriteOptions {
@@ -215,37 +209,56 @@ export async function writeDatabaseDumpToPath(
         }
 
         if (dataSql.before) await handle.write(dataSql.before)
-        const firstPage = await source.loadPage(
-          table,
-          1,
-          TABLE_EXPORT_PAGE_SIZE,
+        const tableStartedAt = Date.now()
+        const tableSource = await source.openTable(table)
+        const overrideSystemValue = (
+          model.type === 'PostgreSQL'
+          && table.fields.some(field => field.auto_increment)
         )
-        const pageCount = Math.max(
-          1,
-          Math.ceil(firstPage.total / TABLE_EXPORT_PAGE_SIZE),
+        // 数据阶段进度在表区间内按行数线性插值，避免大表长时间无进度反馈
+        const tablePercentBase = 30 + Math.round(
+          (tableIndex / Math.max(1, model.tables.length)) * 60,
         )
-        for (let page = 1; page <= pageCount; page += 1) {
-          const current = page === 1
-            ? firstPage
-            : await source.loadPage(table, page, TABLE_EXPORT_PAGE_SIZE)
-          await handle.write(exportRowsChunk(
+        const tablePercentSpan = Math.round(
+          60 / Math.max(1, model.tables.length),
+        )
+        let tableRows = 0
+        let batches = 0
+        let lastReportedRows = 0
+        // 读写流水线：写入当前批次的同时预取下一批，隐藏数据库往返延迟
+        let rows = await tableSource.readNext()
+        while (rows.length > 0) {
+          const pendingNext = tableSource.readNext()
+          // 写盘若抛错会跳出循环，这里提前挂观察器避免预取 Promise 未处理 rejection
+          pendingNext.catch(() => undefined)
+          await handle.write(backupInsertRowsSql(
             model.type,
             table.name,
             columns,
-            current.rows,
-            'sql',
-            rowCount,
-            undefined,
-            {
-              overrideSystemValue: (
-                model.type === 'PostgreSQL'
-                && table.fields.some(field => field.auto_increment)
-              ),
-            },
+            rows,
+            { overrideSystemValue },
           ))
-          rowCount += current.rows.length
-          if (current.rows.length < TABLE_EXPORT_PAGE_SIZE) break
+          tableRows += rows.length
+          batches += 1
+          // 每表最多按 5 万行粒度上报一次中间进度，避免刷爆 IPC
+          if (tableRows - lastReportedRows >= 50000) {
+            lastReportedRows = tableRows
+            const innerRatio = tableSource.total > 0
+              ? Math.min(1, tableRows / tableSource.total)
+              : 0
+            report(
+              'data',
+              tablePercentBase + Math.round(innerRatio * tablePercentSpan),
+              `正在写入表数据 ${tableIndex + 1}/${model.tables.length}: ${table.name}(${tableRows}/${tableSource.total} 行)`,
+            )
+          }
+          rows = await pendingNext
         }
+        rowCount += tableRows
+        logger.debug(
+          'DatabaseDump',
+          `表数据写入完成: 表=${table.name}, 行=${tableRows}, 批次=${batches}, 耗时=${Date.now() - tableStartedAt}ms`,
+        )
         if (dataSql.after) await handle.write(dataSql.after)
         await handle.write('\n')
         report(
@@ -253,7 +266,7 @@ export async function writeDatabaseDumpToPath(
           30 + Math.round(
             ((tableIndex + 1) / Math.max(1, model.tables.length)) * 60,
           ),
-          `已写入表数据 ${tableIndex + 1}/${model.tables.length}: ${table.name}`,
+          `已写入表数据 ${tableIndex + 1}/${model.tables.length}: ${table.name}(${tableRows} 行)`,
         )
       }
     }

@@ -15,10 +15,33 @@ export interface DatabaseActionContext {
 }
 
 export function responseError(
-  response: { error?: { message?: string; detail?: string } },
+  response: { error?: { code?: string; message?: string; detail?: string } },
   fallback: string,
 ): Error {
-  return new Error(response.error?.detail || response.error?.message || fallback)
+  const error = new Error(
+    response.error?.detail || response.error?.message || fallback,
+  )
+  // 保留主进程错误码，供上层识别「连接已失效」这类需要重置连接状态的失败
+  if (response.error?.code) {
+    Object.assign(error, { code: response.error.code })
+  }
+  return error
+}
+
+/**
+ * 判断失败是否源于底层连接已被服务端断开（空闲超时）或连接已不存在。
+ * 仅识别明确表示“连接不可用”的错误码：
+ * CONNECTION_TIMEOUT 可能是慢查询超时而非断连，故不纳入。
+ */
+export function isConnectionInvalidError(error: unknown): boolean {
+  const code = (error as { code?: string } | undefined)?.code
+  if (code === 'CONNECTION_FAILED' || code === 'CONNECTION_NOT_FOUND') {
+    return true
+  }
+  const detail = error instanceof Error ? error.message : String(error ?? '')
+  return detail.includes('连接已失效')
+    || detail.includes('连接不存在')
+    || detail.includes('连接已断开')
 }
 
 export function writeActionLog(
@@ -34,16 +57,22 @@ export function writeActionLog(
   )
 }
 
+export interface CloseDatabaseHandlers {
+  closeDocuments: (context: DatabaseActionContext) => Promise<boolean>
+  onDisconnect: (connection: ConnectionData) => Promise<void>
+  onUnload: (context: DatabaseActionContext) => void
+  /** 连接已在空闲期间失效时回调，用于把 UI 回退为「未连接」并提示重新连接 */
+  onConnectionInvalid: (connection: ConnectionData) => void
+}
+
 export async function closeDatabaseContext(
   context: DatabaseActionContext,
-  closeDocuments: (context: DatabaseActionContext) => Promise<boolean>,
-  onDisconnect: (connection: ConnectionData) => Promise<void>,
-  onUnload: (context: DatabaseActionContext) => void,
+  handlers: CloseDatabaseHandlers,
 ): Promise<void> {
   writeActionLog('info', '开始关闭数据库', context)
-  if (!await closeDocuments(context)) return
+  if (!await handlers.closeDocuments(context)) return
   if (context.connection.type === 'SQLite') {
-    await onDisconnect(context.connection)
+    await handlers.onDisconnect(context.connection)
     writeActionLog('info', 'SQLite 数据库连接已关闭', context)
     return
   }
@@ -54,7 +83,13 @@ export async function closeDatabaseContext(
       context.database,
     )
     if (!result.success) throw responseError(result, '关闭数据库失败')
-    onUnload(context)
+    handlers.onUnload(context)
+    if (result.data?.connectionInvalidated) {
+      // 主进程已识别连接失效并完成本地清理：同步重置连接状态，避免 UI 仍显示“已连接”
+      writeActionLog('warn', '关闭数据库时连接已失效，已重置连接状态', context)
+      handlers.onConnectionInvalid(context.connection)
+      return
+    }
     writeActionLog('info', '数据库已关闭', context)
     message.success(`数据库“${context.database}”已关闭`)
   } catch (error) {

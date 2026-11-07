@@ -27,6 +27,16 @@ export interface TableDefinitionDraft {
   fields: TableFieldDraft[]
   indexes: TableIndexDraft[]
   foreignKeys: TableForeignKeyDraft[]
+  /** TDSQL 建表选项，仅 databaseType === 'TDSQL' 时存在 */
+  tdsql?: TDSQLTableOptions
+}
+
+/** TDSQL 建表选项 */
+export interface TDSQLTableOptions {
+  /** 表类型，默认 'shard' */
+  tableType: 'shard' | 'noshard' | 'broadcast'
+  /** SHARDKEY 字段名，仅 tableType='shard' 时有效 */
+  shardKey?: string
 }
 
 export function supportsAutoIncrement(
@@ -77,12 +87,17 @@ export function createTableDefinitionDraft(
   tableName: string,
   metadata?: TableMetadata,
 ): TableDefinitionDraft {
+  // TDSQL 默认按分表（shard）创建，需要后续指定 SHARDKEY
+  const tdsqlDefaults = databaseType === 'TDSQL'
+    ? { tableType: 'shard' as const }
+    : undefined
   if (!metadata) {
     return {
       name: tableName,
       fields: [createDefaultField(databaseType)],
       indexes: [],
       foreignKeys: [],
+      tdsql: tdsqlDefaults,
     }
   }
   const primaryIndexNames = new Set(
@@ -102,6 +117,7 @@ export function createTableDefinitionDraft(
   return {
     name: tableName,
     primaryKeyName: metadata.primary_key_name,
+    tdsql: tdsqlDefaults,
     fields: metadata.fields.map(field => ({
       key: createDraftKey('field'),
       originalName: field.name,

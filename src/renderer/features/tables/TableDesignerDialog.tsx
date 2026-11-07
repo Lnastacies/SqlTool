@@ -16,6 +16,7 @@ import TableFieldEditor from './TableFieldEditor'
 import TableForeignKeyEditor from './TableForeignKeyEditor'
 import TableIndexEditor from './TableIndexEditor'
 import TableSqlPreview from './TableSqlPreview'
+import TDSQLTableOptionsControls from './TDSQLTableOptionsControls'
 import { TABLE_DATA_TYPE_OPTIONS } from './tableDataTypeCatalog'
 import {
   createTableDefinitionDraft,
@@ -75,10 +76,12 @@ export default function TableDesignerDialog({
   const request = useMemo<SaveTableStructureRequest>(() => ({
     originalName,
     definition: toTableDefinition(draft),
+    // TDSQL 建表选项仅新建表时下发；编辑表走 ALTER，不支持变更分片属性
+    tdsqlOptions: originalName ? undefined : draft.tdsql,
   }), [draft, originalName])
   const validationIssues = useMemo(
-    () => validateTableDefinitionDraft(databaseType, draft),
-    [databaseType, draft],
+    () => validateTableDefinitionDraft(databaseType, draft, !originalName),
+    [databaseType, draft, originalName],
   )
   const handleSave = async () => {
     if (preparingSubmit || saving) return
@@ -170,13 +173,31 @@ export default function TableDesignerDialog({
               key: 'fields',
               label: `字段与类型 (${draft.fields.length})`,
               children: (
-                <TableFieldEditor
-                  databaseType={databaseType}
-                  fields={draft.fields}
-                  onChange={fields => {
-                    setDraft(previous => remapFieldReferences(previous, fields))
-                  }}
-                />
+                <>
+                  {databaseType === 'TDSQL' && draft.tdsql && (
+                    <TDSQLTableOptionsControls
+                      value={draft.tdsql}
+                      fields={draft.fields}
+                      disabled={Boolean(originalName)}
+                      onChange={tdsql => {
+                        // 日志埋点：记录 TDSQL 表类型/SHARDKEY 变更，便于排查分表配置问题
+                        void window.logger.write(
+                          'info',
+                          'TableDesigner',
+                          `TDSQL 选项变更: 表类型=${tdsql.tableType}, SHARDKEY=${tdsql.shardKey || '未指定'}, 表=${draft.name}`,
+                        )
+                        setDraft(previous => ({ ...previous, tdsql }))
+                      }}
+                    />
+                  )}
+                  <TableFieldEditor
+                    databaseType={databaseType}
+                    fields={draft.fields}
+                    onChange={fields => {
+                      setDraft(previous => remapFieldReferences(previous, fields))
+                    }}
+                  />
+                </>
               ),
             },
             {
@@ -192,7 +213,8 @@ export default function TableDesignerDialog({
                 />
               ),
             },
-            {
+            // TDSQL 不支持外键，在 TDSQL 模式下隐藏外键编辑区
+            ...(databaseType === 'TDSQL' ? [] : [{
               key: 'foreign-keys',
               label: `外键 (${draft.foreignKeys.length})`,
               children: (
@@ -204,7 +226,7 @@ export default function TableDesignerDialog({
                   }}
                 />
               ),
-            },
+            }]),
             {
               key: 'sql',
               label: 'SQL 预览',

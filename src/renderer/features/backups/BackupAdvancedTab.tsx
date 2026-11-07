@@ -1,6 +1,7 @@
 import React from 'react'
 import { Alert, Switch } from 'antd'
 import type { DatabaseType } from '../../types'
+import { isMySQLCompatible } from '../mysqlCompat'
 import type { BackupDialogForm } from './backupDialogModel'
 
 interface BackupAdvancedTabProps {
@@ -53,7 +54,7 @@ export default function BackupAdvancedTab({
         </span>
         <Switch
           checked={value.stripDefiners}
-          disabled={disabled || databaseType !== 'MySQL'}
+          disabled={disabled || !isMySQLCompatible(databaseType)}
           onChange={stripDefiners => onChange({ stripDefiners })}
         />
       </div>

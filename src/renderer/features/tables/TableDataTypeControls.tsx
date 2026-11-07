@@ -6,6 +6,7 @@ import {
   Tooltip,
 } from 'antd'
 import type { DatabaseType } from '../../types'
+import { isMySQLCompatible } from '../mysqlCompat'
 import { TABLE_DATA_TYPE_OPTIONS } from './tableDataTypeCatalog'
 import {
   parseTableDataType,
@@ -138,7 +139,7 @@ export function TableDataTypeUnsignedToggle({
 }: TableDataTypeControlProps) {
   const parsed = parseTableDataType(databaseType, value)
   const enabled = (
-    databaseType === 'MySQL'
+    isMySQLCompatible(databaseType)
     && Boolean(parsed.option?.supportsUnsigned || parsed.unsigned)
   )
 

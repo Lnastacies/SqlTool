@@ -108,6 +108,27 @@ export function createCommandDefinitions(
       execute: actions.saveSqlFileAs,
     },
     'application.exit': { execute: actions.exit },
+    // 编辑类命令优先分发到当前活动 Monaco 编辑器；若当前不是查询文档则按规范提示
+    'edit.undo': {
+      enabled: state.canEditDocument,
+      disabledReason: state.canEditDocument ? undefined : '请先打开查询文档',
+      execute: () => actions.editDocument('undo'),
+    },
+    'edit.redo': {
+      enabled: state.canEditDocument,
+      disabledReason: state.canEditDocument ? undefined : '请先打开查询文档',
+      execute: () => actions.editDocument('redo'),
+    },
+    'edit.find': {
+      enabled: state.canEditDocument,
+      disabledReason: state.canEditDocument ? undefined : '请先打开查询文档',
+      execute: () => actions.editDocument('find'),
+    },
+    'edit.replace': {
+      enabled: state.canEditDocument,
+      disabledReason: state.canEditDocument ? undefined : '请先打开查询文档',
+      execute: () => actions.editDocument('replace'),
+    },
     'view.objects': {
       enabled: state.canShowObjects,
       disabledReason: state.canShowObjects ? undefined : '请先选择数据库',

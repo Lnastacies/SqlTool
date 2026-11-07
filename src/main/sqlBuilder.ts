@@ -1,4 +1,6 @@
-export type DatabaseType = 'MySQL' | 'PostgreSQL' | 'SQLServer' | 'SQLite'
+import { isMySQLCompatible } from './database/mysqlCompat'
+
+export type DatabaseType = 'MySQL' | 'PostgreSQL' | 'SQLServer' | 'SQLite' | 'TDSQL'
 
 export interface SQLBuilderOptions {
   databaseType: DatabaseType
@@ -14,6 +16,7 @@ export class SQLBuilder {
   quoteIdentifier(name: string): string {
     switch (this.databaseType) {
       case 'MySQL':
+      case 'TDSQL':
         return `\`${name}\``
       case 'PostgreSQL':
         return `"${name}"`
@@ -183,7 +186,7 @@ export class SQLBuilder {
       }
       if (col.notNull) def += ' NOT NULL'
       if (col.defaultValue !== undefined) def += ` DEFAULT ${this.quoteValue(col.defaultValue)}`
-      if (col.comment && this.databaseType === 'MySQL') def += ` COMMENT '${col.comment}'`
+      if (col.comment && isMySQLCompatible(this.databaseType)) def += ` COMMENT '${col.comment}'`
       
       return def
     }).join(',\n  ')

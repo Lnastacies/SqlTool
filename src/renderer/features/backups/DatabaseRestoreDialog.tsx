@@ -7,6 +7,7 @@ import type {
   RestoreDatabaseBackupRequest,
   RestoreDatabaseBackupResult,
 } from '../../types'
+import { isMySQLCompatible } from '../mysqlCompat'
 import BackupLogTab from './BackupLogTab'
 import type { BackupDialogLog } from './backupDialogModel'
 import {
@@ -32,7 +33,7 @@ export default function DatabaseRestoreDialog({
 }: DatabaseRestoreDialogProps) {
   const [continueOnError, setContinueOnError] = useState(false)
   const [useTransaction, setUseTransaction] = useState(
-    connection.type !== 'MySQL',
+    !isMySQLCompatible(connection.type),
   )
   const [logs, setLogs] = useState<BackupDialogLog[]>([])
   const [percent, setPercent] = useState(0)
@@ -147,7 +148,7 @@ export default function DatabaseRestoreDialog({
             <span><strong>事务保护</strong><small>失败时自动回滚已执行语句</small></span>
             <Switch
               checked={useTransaction && !continueOnError}
-              disabled={running || continueOnError || connection.type === 'MySQL'}
+              disabled={running || continueOnError || isMySQLCompatible(connection.type)}
               onChange={setUseTransaction}
             />
           </div>

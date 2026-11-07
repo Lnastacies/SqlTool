@@ -11,6 +11,7 @@ import {
   mysqlCollationOptions,
   mysqlDefaultCollation,
 } from './createDatabaseEncodingOptions'
+import { isMySQLCompatible } from '../mysqlCompat'
 
 interface DatabaseEditDialogProps {
   connection: ConnectionData
@@ -31,7 +32,7 @@ export default function DatabaseEditDialog({
   const [encodingCatalog, setEncodingCatalog] = useState<
     DatabaseEncodingCatalog
   >()
-  const mysql = connection.type === 'MySQL'
+  const mysql = isMySQLCompatible(connection.type)
   const charset = Form.useWatch('charset', form)
   const collation = Form.useWatch('collation', form)
   const charsetOptions = useMemo(

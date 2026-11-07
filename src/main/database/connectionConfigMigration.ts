@@ -134,7 +134,7 @@ function deduplicateConnections(input: ConnectionData[]): ConnectionData[] {
 }
 
 function defaultPort(type: ConnectionData['type']): number {
-  return { MySQL: 3306, PostgreSQL: 5432, 'SQL Server': 1433, SQLite: 0 }[type]
+  return { MySQL: 3306, TDSQL: 3306, PostgreSQL: 5432, 'SQL Server': 1433, SQLite: 0 }[type]
 }
 
 function isCurrentCatalog(input: unknown): input is PersistedConnectionCatalog {

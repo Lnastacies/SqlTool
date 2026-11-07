@@ -37,6 +37,11 @@ export interface DropDatabaseResult {
 
 export interface CloseDatabaseResult {
   name: string
+  /**
+   * 关闭过程中检测到该连接已失效（服务端空闲超时断开），已一并剔除。
+   * 渲染层据此把连接节点回退为“未连接”，提示用户重新连接。
+   */
+  connectionInvalidated?: boolean
 }
 
 export interface DatabaseDumpResult {

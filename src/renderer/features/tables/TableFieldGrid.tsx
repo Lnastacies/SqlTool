@@ -2,6 +2,7 @@ import React from 'react'
 import { Input, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { DatabaseType } from '../../types'
+import { isMySQLCompatible } from '../mysqlCompat'
 import {
   TableDataTypeArgumentInput,
   TableDataTypeScaleInput,
@@ -106,7 +107,7 @@ export default function TableFieldGrid({
       ),
     },
   ]
-  if (databaseType === 'MySQL') {
+  if (isMySQLCompatible(databaseType)) {
     columns.push({
       title: '无符号',
       width: 62,
@@ -191,7 +192,7 @@ export default function TableFieldGrid({
       rowKey="key"
       size="small"
       pagination={false}
-      scroll={{ x: databaseType === 'MySQL' ? 1320 : 1260, y: 390 }}
+      scroll={{ x: isMySQLCompatible(databaseType) ? 1320 : 1260, y: 390 }}
       dataSource={fields}
       columns={columns}
     />

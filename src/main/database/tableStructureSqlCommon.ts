@@ -5,12 +5,14 @@ import type {
   TableForeignKeyDefinition,
   TableIndexDefinition,
 } from './tableStructureTypes'
+import { isMySQLCompatible } from './mysqlCompat'
 
 export function quoteTableIdentifier(
   value: string,
   databaseType: TableDatabaseType,
 ): string {
-  if (databaseType === 'MySQL') {
+  // MySQL 协议兼容类型（MySQL/TDSQL）标识符统一使用反引号引用
+  if (isMySQLCompatible(databaseType)) {
     return `\`${value.replace(/`/g, '``')}\``
   }
   if (databaseType === 'SQL Server') {
@@ -25,7 +27,7 @@ export function tableReference(
   tableName: string,
 ): string {
   const quote = (value: string) => quoteTableIdentifier(value, databaseType)
-  if (databaseType === 'MySQL') return `${quote(database)}.${quote(tableName)}`
+  if (isMySQLCompatible(databaseType)) return `${quote(database)}.${quote(tableName)}`
   if (databaseType === 'SQL Server') {
     return `${quote(database)}.[dbo].${quote(tableName)}`
   }
@@ -81,11 +83,39 @@ export function buildForeignKeyClause(
   ].join(' ')
 }
 
+/**
+ * 生成 TDSQL 建表语句的分表/广播后缀。
+ * - shard 且已指定 shardKey → ` SHARDKEY=\`字段名\``
+ * - broadcast → ` BROADCAST`
+ * - noshard 或无选项 → 空串
+ * 仅当 databaseType === 'TDSQL' 时生效，其他数据库类型直接返回空串。
+ */
+export function buildTDSQLTableSuffix(
+  databaseType: TableDatabaseType,
+  tdsqlOptions?: {
+    tableType: 'shard' | 'noshard' | 'broadcast'
+    shardKey?: string
+  },
+): string {
+  if (databaseType !== 'TDSQL' || !tdsqlOptions) return ''
+  if (tdsqlOptions.tableType === 'shard' && tdsqlOptions.shardKey) {
+    return ` SHARDKEY=${quoteTableIdentifier(tdsqlOptions.shardKey, databaseType)}`
+  }
+  if (tdsqlOptions.tableType === 'broadcast') {
+    return ' BROADCAST'
+  }
+  return ''
+}
+
 export function buildCreateTableStatements(
   databaseType: TableDatabaseType,
   database: string,
   definition: TableDefinition,
   overrideName?: string,
+  tdsqlOptions?: {
+    tableType: 'shard' | 'noshard' | 'broadcast'
+    shardKey?: string
+  },
 ): string[] {
   const tableName = overrideName || definition.name
   const quote = (value: string) => quoteTableIdentifier(value, databaseType)
@@ -107,8 +137,11 @@ export function buildCreateTableStatements(
     foreignKey => buildForeignKeyClause(databaseType, foreignKey),
   ))
 
+  // TDSQL 建表需在 CREATE TABLE 末尾追加分表/广播子句
+  const tdsqlSuffix = buildTDSQLTableSuffix(databaseType, tdsqlOptions)
+
   const statements = [
-    `CREATE TABLE ${tableReference(databaseType, database, tableName)} (\n  ${clauses.join(',\n  ')}\n)`,
+    `CREATE TABLE ${tableReference(databaseType, database, tableName)} (\n  ${clauses.join(',\n  ')}\n)${tdsqlSuffix}`,
   ]
   statements.push(...definition.indexes.map(index => buildCreateIndexStatement(
     databaseType,
