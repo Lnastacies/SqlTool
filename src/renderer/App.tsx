@@ -1967,9 +1967,20 @@ function App() {
       document => document.id === documentId && document.kind === 'data',
     )
     if (existingDocument) {
+      // 同一张表重复双击时只聚焦既有标签，不重复创建
+      void window.logger.write(
+        'info',
+        'WorkspaceTabs',
+        `命中已存在的表数据标签并聚焦: 连接=${targetDatabase.connId}, 数据库=${targetDatabase.database}, 表=${tableName}, 文档=${documentId}`,
+      )
       activateDocument(documentId)
       return
     }
+    void window.logger.write(
+      'info',
+      'WorkspaceTabs',
+      `新开表数据标签: 连接=${targetDatabase.connId}, 数据库=${targetDatabase.database}, 表=${tableName}, 文档=${documentId}`,
+    )
     openData({
       id: documentId,
       kind: 'data',

@@ -5,6 +5,10 @@ import type {
   WorkspaceDocument,
   WorkspaceSurface,
 } from './workspaceTypes'
+import {
+  OBJECTS_TAB_ID,
+  resolveActiveTabAfterClose,
+} from './workspaceTabModel'
 
 interface WorkspaceState {
   documents: WorkspaceDocument[]
@@ -62,27 +66,34 @@ function workspaceReducer(
         ),
       }
     case 'close': {
-      const closingIndex = state.documents.findIndex(
-        document => document.id === action.id,
+      // 标签顺序中常驻表清单标签始终位于首位，参与相邻标签回落计算
+      const tabIds = [
+        OBJECTS_TAB_ID,
+        ...state.documents.map(document => document.id),
+      ]
+      const activeTabId = state.surface === 'objects'
+        ? OBJECTS_TAB_ID
+        : state.activeDocumentId
+      const nextTabId = resolveActiveTabAfterClose(
+        tabIds,
+        action.id,
+        activeTabId,
       )
       const documents = state.documents.filter(
         document => document.id !== action.id,
       )
-      const wasActive = state.activeDocumentId === action.id
-      const nextIndex = Math.max(0, closingIndex - 1)
-      const nextActive = wasActive
-        ? documents[nextIndex]?.id || documents[documents.length - 1]?.id || ''
-        : state.activeDocumentId
+      const backToObjects = nextTabId === OBJECTS_TAB_ID
       return {
         documents,
-        activeDocumentId: nextActive,
-        surface: documents.length === 0 ? 'objects' : state.surface,
+        activeDocumentId: backToObjects ? '' : nextTabId,
+        surface: backToObjects ? 'objects' : 'documents',
       }
     }
     case 'closeAll':
       return initialState
     case 'showObjects':
-      return { ...state, surface: 'objects' }
+      // 切回常驻表清单标签时清空活动文档，避免命令误作用到隐藏文档
+      return { ...state, surface: 'objects', activeDocumentId: '' }
     default:
       return state
   }
@@ -100,7 +111,8 @@ export function useWorkspace() {
   }, [])
 
   const activateDocument = useCallback((id: string) => {
-    dispatch({ type: 'activate', id })
+    // 常驻表清单标签不是文档，切换时只恢复对象浏览视图
+    dispatch(id === OBJECTS_TAB_ID ? { type: 'showObjects' } : { type: 'activate', id })
   }, [])
 
   const updateQuery = useCallback((
